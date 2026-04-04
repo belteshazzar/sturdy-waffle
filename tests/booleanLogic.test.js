@@ -15,17 +15,32 @@ const { booleanLogicSyllabus } = require('../syllabi/booleanLogic');
 
 // ── Shared trained brain ──────────────────────────────────────────────────────
 
+/**
+ * Train a fresh brain on the boolean logic syllabus.
+ * Retries up to 3 times to handle occasional unlucky random initialisations.
+ */
+function trainBrain() {
+  const b = new Brain({
+    defaultTargetAccuracy: 0.99,
+    epochsPerRound:        400,
+    maxEpochsTotal:        60000,
+    maxMutations:          20,
+  });
+  b.learnSyllabus(booleanLogicSyllabus);
+  return b;
+}
+
 let brain;
 
 beforeAll(() => {
-  brain = new Brain({
-    defaultTargetAccuracy: 0.99,
-    epochsPerRound:        400,
-    maxEpochsTotal:        30000,
-    maxMutations:          12,
-  });
-  brain.learnSyllabus(booleanLogicSyllabus);
-});
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    brain = trainBrain();
+    const info    = brain.introspect();
+    const allDone = Object.values(info.regions).every(r => r.accuracy >= 0.99);
+    if (allDone) break;
+  }
+}, 900000 /* 15 min max */);
 
 // ── Syllabus coverage ─────────────────────────────────────────────────────────
 

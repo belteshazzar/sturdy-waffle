@@ -56,7 +56,7 @@ class Brain extends EventEmitter {
 
     this.regions       = new Map();   // domain → BrainRegion
     this.router        = new Router();
-    this.knowledgeTree = {};
+    this.knowledgeTree = Object.create(null);
     this.createdAt     = new Date().toISOString();
     this.version       = '1.0.0';
 
@@ -244,7 +244,11 @@ class Brain extends EventEmitter {
     const parts = domain.split('.');
     let node = this.knowledgeTree;
     for (const part of parts) {
-      if (!node[part]) node[part] = {};
+      // Guard against prototype-polluting keys such as __proto__ or constructor
+      if (part === '__proto__' || part === 'constructor' || part === 'prototype') continue;
+      if (!Object.prototype.hasOwnProperty.call(node, part)) {
+        node[part] = Object.create(null);
+      }
       node = node[part];
     }
     node._domain = domain;

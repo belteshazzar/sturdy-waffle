@@ -137,3 +137,6 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Brain state saves (keep the directory, ignore JSON files)
+saves/*.json

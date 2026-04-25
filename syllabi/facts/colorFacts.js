@@ -3,19 +3,19 @@
 const FactBase = require('../../src/knowledge/FactBase');
 const Syllabus = require('../../src/learning/Syllabus');
 
-// ── Fruit and food colours ─────────────────────────────────────────────────────
+// ── Fruit and food colors ─────────────────────────────────────────────────────
 //
-// Eight common fruits/foods with five colour predicates.  Each predicate asks
+// Eight common fruits/foods with five color predicates.  Each predicate asks
 // a binary question ("is this item primarily red?") which the Brain can learn
 // and later answer via brain.queryFact(subject, predicate).
 //
 // Predicates
 // ──────────
-//   isRed    — the item is primarily red in colour
-//   isGreen  — the item is primarily green in colour
-//   isYellow — the item is primarily yellow in colour
-//   isOrange — the item is primarily orange in colour
-//   isPurple — the item is primarily purple/blue in colour
+//   isRed    — the item is primarily red in color
+//   isGreen  — the item is primarily green in color
+//   isYellow — the item is primarily yellow in color
+//   isOrange — the item is primarily orange in color
+//   isPurple — the item is primarily purple/blue in color
 //
 // Subjects (in vocabulary order — encoding is stable)
 //   0  apple      → isRed=T  isGreen=F  isYellow=F  isOrange=F  isPurple=F
@@ -33,7 +33,7 @@ const Syllabus = require('../../src/learning/Syllabus');
 //   brain.queryFact('banana', 'isYellow') // → 1
 //   brain.queryFact('lime',   'isGreen')  // → 1
 
-const colorFacts = new FactBase('Fruit and Food Colours');
+const colorFacts = new FactBase('Fruit and Food Colors');
 
 // isRed
 colorFacts
@@ -93,30 +93,30 @@ colorFacts
 // ── Derive lessons and syllabus ───────────────────────────────────────────────
 
 /**
- * One classification Lesson per colour predicate (5 total).
+ * One classification Lesson per color predicate (5 total).
  * Domain keys: facts.isRed, facts.isGreen, facts.isYellow, facts.isOrange,
  *              facts.isPurple
  */
 const lessons = colorFacts.toLessons();
 
 /**
- * A colour-knowledge curriculum teaching the Brain to identify the primary
- * colour of eight common fruits and foods.
+ * A color-knowledge curriculum teaching the Brain to identify the primary
+ * color of eight common fruits and foods.
  *
  * After learning this syllabus the Brain can answer questions like:
  *   "Is an orange red?"   → brain.queryFact('orange', 'isRed')    // → 0
  *   "Is an apple red?"    → brain.queryFact('apple',  'isRed')    // → 1
  *   "Is a banana yellow?" → brain.queryFact('banana', 'isYellow') // → 1
  *
- * Limitation: the Brain cannot yet answer open-ended "what colour is X?"
- * queries (that requires multi-class support).  Query each colour predicate
+ * Limitation: the Brain cannot yet answer open-ended "what color is X?"
+ * queries (that requires multi-class support).  Query each color predicate
  * independently and check which one returns 1.
  */
 const colorSyllabus = new Syllabus({
-  name:        'Fruit and Food Colours',
-  description: 'Colour facts for eight fruits/foods — isRed, isGreen, isYellow, isOrange, isPurple.',
+  name:        'Fruit and Food Colors',
+  description: 'Color facts for eight fruits/foods — isRed, isGreen, isYellow, isOrange, isPurple.',
   lessons,
-  tags: ['facts', 'knowledge', 'colours', 'food', 'declarative'],
+  tags: ['facts', 'knowledge', 'colors', 'food', 'declarative'],
 });
 
 module.exports = {

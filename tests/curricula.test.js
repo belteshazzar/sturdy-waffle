@@ -89,7 +89,7 @@ describe('colorSyllabus — structure', () => {
 });
 
 describe('Brain — learnFacts with colorFacts', () => {
-  test('trains one region per colour predicate', () => {
+  test('trains one region per color predicate', () => {
     const brain = fastBrain();
     brain.learnFacts(colorFacts);
     ['isRed', 'isGreen', 'isYellow', 'isOrange', 'isPurple'].forEach(p => {
@@ -97,7 +97,7 @@ describe('Brain — learnFacts with colorFacts', () => {
     });
   });
 
-  test('queryFact returns 0 or 1 for colour predicates', () => {
+  test('queryFact returns 0 or 1 for color predicates', () => {
     const brain = fastBrain();
     brain.learnFacts(colorFacts);
     const result = brain.queryFact('apple', 'isRed');

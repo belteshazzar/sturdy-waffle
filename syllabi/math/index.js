@@ -69,7 +69,7 @@ const addLesson = new Lesson({
 });
 
 /**
- * Subtraction: output = a − b  (range [−1, 1], normalised to [0, 1]).
+ * Subtraction: output = a - b  (range [-1, 1], normalised to [0, 1]).
  */
 const subLesson = new Lesson({
   name:        'Subtraction',

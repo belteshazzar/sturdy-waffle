@@ -68,6 +68,8 @@ class BrainRegion extends EventEmitter {
     const outSize = lesson.outputSize;
     const sampleCount = Array.isArray(lesson.trainingData) ? lesson.trainingData.length : 0;
     const isRegression = lesson.mode === 'regression';
+    // Sub-linear complexity boost: larger datasets justify more starting capacity,
+    // but sqrt growth avoids over-scaling hidden size for big sample counts.
     const complexityBoost = Math.ceil(Math.sqrt(Math.max(1, sampleCount)) / 2);
     // Start with higher capacity for regression to better capture continuous math functions.
     const hidden = isRegression

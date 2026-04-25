@@ -4,6 +4,15 @@ const { EventEmitter } = require('events');
 const BrainRegion      = require('./BrainRegion');
 const Router           = require('../routing/Router');
 
+// Decomposition modules (loaded lazily to avoid circular deps at startup)
+const {
+  WorkingMemory,
+  DecompositionGraph,
+  DecompositionController,
+  computeExpertTrace,
+  tokens: decompTokens,
+} = require('../decomposition');
+
 /**
  * Brain is the top-level adaptive intelligence container.
  *
@@ -32,6 +41,11 @@ const Router           = require('../routing/Router');
  *  lesson:complete      { domain, lessonName, trained, accuracy, mutationCount, totalEpochs }
  *  syllabus:start       { name, lessonCount }
  *  syllabus:complete    { name, results }
+ *
+ *  Decomposition events (emitted by solve() / trainDecomposition())
+ *  decomposition:step      { step, op, args, result, memory }
+ *  decomposition:complete  { tokens, solved, answer, steps, graph }
+ *  decomposition:trained   { exampleCount, stageCount, replaySize }
  */
 class Brain extends EventEmitter {
   /**
@@ -60,6 +74,7 @@ class Brain extends EventEmitter {
     this.knowledgeTree = Object.create(null);
     this.createdAt     = new Date().toISOString();
     this.version       = '1.0.0';
+    this.controller    = null;       // DecompositionController — null until initialised
 
     if (this.config.verbose) {
       this._setupVerboseLogging();
@@ -299,7 +314,201 @@ class Brain extends EventEmitter {
     return this.regions.has(domain);
   }
 
-  // ── Knowledge tree ────────────────────────────────────────────────────────
+  // ── Decomposition controller ──────────────────────────────────────────────
+
+  /**
+   * Initialise a fresh DecompositionController if one does not already exist.
+   *
+   * The controller's working-memory dimensions must match the token vocabulary
+   * used by WorkingMemory (maxSlots × VOCAB_SIZE input neurons, maxSlots output
+   * neurons).  These defaults work for all Boolean-depth-≤-3 expressions.
+   *
+   * @param {object} [controllerConfig]  Forwarded to DecompositionController()
+   * @returns {DecompositionController}
+   */
+  initController(controllerConfig = {}) {
+    if (!this.controller) {
+      this.controller = new DecompositionController(controllerConfig);
+    }
+    return this.controller;
+  }
+
+  /**
+   * Train the decomposition controller via imitation learning (supervised
+   * warm-start) followed by optional replay consolidation.
+   *
+   * Phase 1 — Imitation:
+   *   For every problem in every curriculum stage, the expert "leftmost-first"
+   *   policy is run to generate a (stateVec, targetStart) trace.  The
+   *   controller is then trained on the aggregated trace via MSE regression.
+   *
+   * Phase 2 — Replay:
+   *   If the replay buffer already holds successful solve() episodes, a batch
+   *   is sampled and used for additional supervised fine-tuning — reinforcing
+   *   strategies that were empirically effective.
+   *
+   * Neuroscience analogue: imitation learning corresponds to procedural
+   * memory encoding; replay consolidation corresponds to sleep-phase
+   * hippocampal → cortical memory transfer.
+   *
+   * @param {DecompositionCurriculum} curriculum
+   * @param {object} [opts]
+   * @param {number} [opts.epochs=50]         Imitation training epochs
+   * @param {number} [opts.replayBatch=32]    Replay sample size
+   * @param {number} [opts.replayEpochs=5]    Replay fine-tuning epochs
+   * @returns {{ exampleCount: number, stageCount: number }}
+   */
+  trainDecomposition(curriculum, opts = {}) {
+    const {
+      epochs       = 50,
+      replayBatch  = 32,
+      replayEpochs = 5,
+    } = opts;
+
+    if (!this.controller) this.initController();
+
+    const stages      = curriculum.getStages();
+    const allExamples = [];
+
+    for (const stage of stages) {
+      for (const problem of stage.problems) {
+        const { trace } = computeExpertTrace(
+          problem.tokens,
+          (opTok, args) => {
+            // Prefer a trained specialist for evaluation fidelity; fall back to
+            // the deterministic truth table (supplied by the curriculum).
+            const domain = decompTokens.TOKEN_DOMAIN[opTok];
+            if (domain && this.router.hasRoute(domain)) {
+              return this.predictBinary(args, domain)[0];
+            }
+            return curriculum.evalOp
+              ? curriculum.evalOp(opTok, args)
+              : _fallbackEvalOp(opTok, args);
+          }
+        );
+        for (const step of trace) {
+          allExamples.push({ stateVec: step.stateVec, targetStart: step.chosenStart });
+        }
+      }
+    }
+
+    this.controller.trainImitation(allExamples, epochs);
+
+    // Phase 2 — replay consolidation
+    if (this.controller.replayBuffer.size >= replayBatch) {
+      this.controller.replayTrain(replayBatch, replayEpochs);
+    }
+
+    const result = { exampleCount: allExamples.length, stageCount: stages.length };
+    this.emit('decomposition:trained', {
+      ...result,
+      replaySize: this.controller.replayBuffer.size,
+    });
+    return result;
+  }
+
+  /**
+   * Solve a flat-token problem using the learned decomposition controller.
+   *
+   * This is the **new evaluation pathway** that complements (and does not
+   * replace) the legacy evaluate() method.  Rather than walking a pre-parsed
+   * tree, the controller *learns* which sub-expression to reduce at each step.
+   *
+   * Pathway:
+   *   1. Load tokens into WorkingMemory.
+   *   2. At each step:
+   *        a. Controller (PFC) selects which reduction to apply (basal-ganglia
+   *           gating over valid candidates).
+   *        b. The appropriate specialist BrainRegion executes the operation.
+   *        c. The result is written back into WorkingMemory.
+   *   3. Repeat until solved or budget exhausted.
+   *   4. Store the episode trace in the replay buffer.
+   *
+   * The controller must be initialised (via initController() or
+   * trainDecomposition()) before calling solve().  The relevant specialist
+   * BrainRegions must also be trained.
+   *
+   * @param {number[]} tokens   Flat prefix-notation token sequence
+   * @param {object}  [opts]
+   * @param {boolean} [opts.forceExplore=false]  Force random action selection
+   * @param {number}  [opts.maxSteps=32]         Iteration limit
+   *
+   * @returns {{
+   *   answer: number | null,
+   *   solved: boolean,
+   *   steps:  number,
+   *   graph:  object
+   * }}
+   */
+  solve(tokens, opts = {}) {
+    const { forceExplore = false, maxSteps = 32 } = opts;
+
+    if (!this.controller) {
+      throw new Error(
+        'Brain has no decomposition controller. ' +
+        'Call brain.initController() then brain.trainDecomposition() first.'
+      );
+    }
+
+    const mem   = new WorkingMemory();
+    const graph = new DecompositionGraph();
+    mem.load(tokens);
+    graph.init(tokens);
+
+    const trace = [];
+    let   steps = 0;
+
+    while (!mem.isSolved() && steps < maxSteps) {
+      const action = this.controller.selectAction(mem, forceExplore);
+
+      if (!action) {
+        this.emit('decomposition:stuck', { tokens, steps, memory: mem.slots.slice(0, mem.length) });
+        break;
+      }
+
+      const domain = decompTokens.TOKEN_DOMAIN[action.op];
+      if (!domain || !this.router.hasRoute(domain)) {
+        throw new Error(
+          `solve(): no trained specialist for domain '${domain}'. ` +
+          'Train the Boolean logic syllabus first.'
+        );
+      }
+
+      const result = this.predictBinary(action.args, domain)[0];
+
+      trace.push({
+        stateVec:    mem.toVector(),
+        chosenStart: action.start,
+        op:          action.op,
+        args:        [...action.args],
+        result,
+      });
+
+      graph.addStep(action.start, action.op, action.args, result);
+      mem.reduce(action.start, decompTokens.ARITY[action.op], result);
+      steps++;
+
+      this.emit('decomposition:step', {
+        step:   steps,
+        op:     decompTokens.TOKEN_NAMES[action.op],
+        args:   action.args,
+        result,
+        memory: mem.slots.slice(0, mem.length),
+      });
+    }
+
+    const solved = mem.isSolved();
+    const answer = mem.answer();
+
+    this.controller.storeTrace({ steps: trace, reward: solved ? 1 : -1, solved });
+
+    const graphJSON = graph.toJSON();
+    this.emit('decomposition:complete', { tokens, solved, answer, steps, graph: graphJSON });
+
+    return { answer, solved, steps, graph: graphJSON };
+  }
+
+
 
   _updateKnowledgeTree(domain) {
     const parts = domain.split('.');
@@ -328,7 +537,8 @@ class Brain extends EventEmitter {
    *   domains: string[],
    *   knowledgeTree: object,
    *   routerTree: object,
-   *   regions: object
+   *   regions: object,
+   *   controller: object | null
    * }}
    */
   introspect() {
@@ -345,6 +555,7 @@ class Brain extends EventEmitter {
       knowledgeTree: this.knowledgeTree,
       routerTree:    this.router.getTreeStructure(),
       regions,
+      controller:    this.controller ? this.controller.getInfo() : null,
     };
   }
 
@@ -382,13 +593,14 @@ class Brain extends EventEmitter {
         domain,
         region: region.toJSON(),
       })),
+      controller: this.controller ? this.controller.toJSON() : null,
     };
   }
 
   static fromJSON(data) {
-    const brain        = new Brain(data.config || {});
-    brain.version      = data.version || '1.0.0';
-    brain.createdAt    = data.createdAt || new Date().toISOString();
+    const brain         = new Brain(data.config || {});
+    brain.version       = data.version    || '1.0.0';
+    brain.createdAt     = data.createdAt  || new Date().toISOString();
     brain.knowledgeTree = data.knowledgeTree || {};
 
     for (const { domain, region: regionData } of (data.regions || [])) {
@@ -397,7 +609,33 @@ class Brain extends EventEmitter {
       brain.router.register(domain, region);
     }
 
+    if (data.controller) {
+      brain.controller = DecompositionController.fromJSON(data.controller);
+    }
+
     return brain;
+  }
+}
+
+// ── Module-level helpers ──────────────────────────────────────────────────────
+
+/**
+ * Fallback Boolean truth-table evaluator used inside trainDecomposition() when
+ * no trained specialist exists yet.  Kept outside the Brain class to avoid
+ * polluting the public surface.
+ * @private
+ */
+function _fallbackEvalOp(opTok, args) {
+  const { TOKEN } = decompTokens;
+  switch (opTok) {
+    case TOKEN.AND:  return args[0] & args[1];
+    case TOKEN.OR:   return args[0] | args[1];
+    case TOKEN.NOT:  return args[0] === 0 ? 1 : 0;
+    case TOKEN.XOR:  return args[0] ^ args[1];
+    case TOKEN.NAND: return (args[0] & args[1]) === 0 ? 1 : 0;
+    case TOKEN.NOR:  return (args[0] | args[1]) === 0 ? 1 : 0;
+    case TOKEN.XNOR: return (args[0] ^ args[1]) === 0 ? 1 : 0;
+    default: throw new Error(`_fallbackEvalOp: unknown token ${opTok}`);
   }
 }
 

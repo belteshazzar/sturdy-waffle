@@ -8,6 +8,7 @@
  *
  * Usage:
  *   const { Brain, Lesson, Syllabus } = require('sturdy-waffle');
+ *   const { WorkingMemory, tokens }   = require('sturdy-waffle');
  */
 
 const Brain        = require('./src/brain/Brain');
@@ -18,6 +19,16 @@ const StateManager = require('./src/persistence/StateManager');
 const Lesson       = require('./src/learning/Lesson');
 const Syllabus     = require('./src/learning/Syllabus');
 
+// Decomposition subsystem
+const {
+  WorkingMemory,
+  DecompositionGraph,
+  DecompositionController,
+  ReplayBuffer,
+  tokens,
+  computeExpertTrace,
+} = require('./src/decomposition');
+
 module.exports = {
   Brain,
   BrainRegion,
@@ -26,4 +37,11 @@ module.exports = {
   StateManager,
   Lesson,
   Syllabus,
+  // Decomposition
+  WorkingMemory,
+  DecompositionGraph,
+  DecompositionController,
+  ReplayBuffer,
+  tokens,
+  computeExpertTrace,
 };

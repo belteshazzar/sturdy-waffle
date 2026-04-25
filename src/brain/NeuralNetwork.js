@@ -196,6 +196,24 @@ class NeuralNetwork {
     return correct / samples.length;
   }
 
+  /**
+   * Fraction of samples whose predicted continuous output is within `tolerance`
+   * of every target value.  Designed for regression (non-binary) tasks where
+   * exact equality is not meaningful.
+   *
+   * @param {Array<{input: number[], output: number[]}>} samples
+   * @param {number} [tolerance=0.05]  Maximum allowed per-dimension absolute error
+   * @returns {number}  0.0 – 1.0
+   */
+  regressionAccuracy(samples, tolerance = 0.05) {
+    let correct = 0;
+    for (const sample of samples) {
+      const predicted = this.predict(sample.input);
+      if (predicted.every((p, i) => Math.abs(p - sample.output[i]) <= tolerance)) correct++;
+    }
+    return correct / samples.length;
+  }
+
   // ── Structural mutation ────────────────────────────────────────────────────
 
   /**

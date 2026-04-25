@@ -48,6 +48,7 @@ class BrainRegion extends EventEmitter {
       accuracyPlateauThreshold: 0.005,
       mutationPatience:         3,      // rounds without improvement before mutating
       baseLearningRate:         0.2,
+      regressionTolerance:      0.05,   // tolerance for regression accuracy checks
       ...config,
     };
 
@@ -59,19 +60,81 @@ class BrainRegion extends EventEmitter {
 
   /**
    * Size the initial hidden layer relative to the problem's input complexity.
+   * Reads optional lesson.networkConfig to select activations, and pre-computes
+   * normalised training / validation data if lesson.normalise is provided.
    */
   _initializeNetwork(lesson) {
-    const inSize    = lesson.inputSize;
-    const outSize   = lesson.outputSize;
+    const inSize  = lesson.inputSize;
+    const outSize = lesson.outputSize;
     // Wider start for more complex input spaces
-    const hidden    = Math.max(6, Math.min(32, inSize * 6));
+    const hidden  = Math.max(6, Math.min(32, inSize * 6));
 
+    const netConfig = lesson.networkConfig || {};
     this.network = new NeuralNetwork({
       architecture:     [inSize, hidden, outSize],
       learningRate:     this.config.baseLearningRate,
-      hiddenActivation: 'sigmoid',
-      outputActivation: 'sigmoid',
+      hiddenActivation: netConfig.hiddenActivation || 'sigmoid',
+      outputActivation: netConfig.outputActivation || 'sigmoid',
     });
+
+    // Pre-compute normalised copies of the training and validation sets.
+    // When lesson.normalise is null these are identical to the raw sets.
+    this._normTrainingData   = lesson.trainingData.map(s => this._normalizeSample(s));
+    const rawVal             = lesson.validationData || lesson.trainingData;
+    this._normValidationData = rawVal.map(s => this._normalizeSample(s));
+  }
+
+  // ── Normalisation helpers ─────────────────────────────────────────────────
+
+  /** Scale a single value from [min, max] → [0, 1]. */
+  _scaleValue(v, range) {
+    const span = range[1] - range[0];
+    if (span === 0) return 0;
+    return (v - range[0]) / span;
+  }
+
+  /** Invert the scaling: [0, 1] → [min, max]. */
+  _unscaleValue(v, range) {
+    return v * (range[1] - range[0]) + range[0];
+  }
+
+  _normalizeInput(input) {
+    const range = this.lesson.normalise && this.lesson.normalise.inputRange;
+    if (!range) return input;
+    return input.map(v => this._scaleValue(v, range));
+  }
+
+  _normalizeOutput(output) {
+    const range = this.lesson.normalise && this.lesson.normalise.outputRange;
+    if (!range) return output;
+    return output.map(v => this._scaleValue(v, range));
+  }
+
+  _denormalizeOutput(output) {
+    const range = this.lesson.normalise && this.lesson.normalise.outputRange;
+    if (!range) return output;
+    return output.map(v => this._unscaleValue(v, range));
+  }
+
+  _normalizeSample(sample) {
+    return {
+      input:  this._normalizeInput(sample.input),
+      output: this._normalizeOutput(sample.output),
+    };
+  }
+
+  // ── Accuracy selection ────────────────────────────────────────────────────
+
+  /**
+   * Choose the appropriate accuracy metric based on the lesson mode.
+   * 'regression' uses a tolerance-based continuous metric;
+   * 'classification' (default) uses exact binary matching.
+   */
+  _measureAccuracy(data) {
+    if (this.lesson.mode === 'regression') {
+      return this.network.regressionAccuracy(data, this.config.regressionTolerance);
+    }
+    return this.network.accuracy(data);
   }
 
   // ── Training loop ─────────────────────────────────────────────────────────
@@ -84,9 +147,8 @@ class BrainRegion extends EventEmitter {
    */
   train() {
     // Fast-path: already trained and accuracy still holds
-    const testData = this.lesson.validationData || this.lesson.trainingData;
     if (this.trained) {
-      this.accuracy = this.network.accuracy(testData);
+      this.accuracy = this._measureAccuracy(this._normValidationData);
       if (this.accuracy >= this.config.targetAccuracy) {
         return { trained: true, accuracy: this.accuracy, mutationCount: this.mutationCount, totalEpochs: 0 };
       }
@@ -108,10 +170,10 @@ class BrainRegion extends EventEmitter {
       const effectiveLR = Math.max(0.001, this.config.baseLearningRate * this.plasticity);
       this.network.learningRate = effectiveLR;
 
-      const { finalLoss } = this.network.train(this.lesson.trainingData, this.config.epochsPerRound);
+      const { finalLoss } = this.network.train(this._normTrainingData, this.config.epochsPerRound);
       totalEpochs += this.config.epochsPerRound;
 
-      this.accuracy = this.network.accuracy(testData);
+      this.accuracy = this._measureAccuracy(this._normValidationData);
 
       const snapshot = {
         epoch:        totalEpochs,
@@ -229,12 +291,24 @@ class BrainRegion extends EventEmitter {
 
   // ── Inference ─────────────────────────────────────────────────────────────
 
+  /**
+   * Return the continuous output of this region for the given raw input.
+   * Input normalisation and output denormalisation are applied automatically
+   * when lesson.normalise is configured, so callers always work in raw units.
+   */
   predict(input) {
-    return this.network.predict(input);
+    const normInput  = this._normalizeInput(input);
+    const normOutput = this.network.predict(normInput);
+    return this._denormalizeOutput(normOutput);
   }
 
+  /**
+   * Return a thresholded (0/1) binary output.  Input normalisation is applied;
+   * the binary output itself is never denormalised.
+   */
   predictBinary(input, threshold = 0.5) {
-    return this.network.predictBinary(input, threshold);
+    const normInput = this._normalizeInput(input);
+    return this.network.predictBinary(normInput, threshold);
   }
 
   // ── Introspection ─────────────────────────────────────────────────────────

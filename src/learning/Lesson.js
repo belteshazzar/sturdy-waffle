@@ -19,6 +19,16 @@ class Lesson {
    * @param {number}   [opts.inputSize]   Inferred from first training sample
    * @param {number}   [opts.outputSize]  Inferred from first training sample
    * @param {string[]} [opts.tags]        Arbitrary labels for grouping
+   * @param {object}   [opts.networkConfig]  Override the default network activations.
+   *   e.g. `{ hiddenActivation: 'tanh', outputActivation: 'linear' }` for regression.
+   * @param {'classification'|'regression'} [opts.mode='classification']
+   *   'classification' uses binary-threshold accuracy; 'regression' uses
+   *   tolerance-based continuous accuracy.
+   * @param {object}   [opts.normalise]   Optional scaling applied to raw data before
+   *   feeding the network.  Both fields are independent and optional:
+   *   `{ inputRange: [min, max], outputRange: [min, max] }`
+   *   Values are scaled from the given range to [0, 1] for training and the
+   *   inverse is applied to predictions so callers always work in raw units.
    */
   constructor({
     name,
@@ -29,6 +39,9 @@ class Lesson {
     inputSize,
     outputSize,
     tags = [],
+    networkConfig = null,
+    mode = 'classification',
+    normalise = null,
   }) {
     if (!name)                              throw new Error('Lesson must have a name');
     if (!domain)                            throw new Error('Lesson must have a domain');
@@ -44,6 +57,9 @@ class Lesson {
     this.inputSize      = inputSize  ?? trainingData[0].input.length;
     this.outputSize     = outputSize ?? trainingData[0].output.length;
     this.tags           = tags;
+    this.networkConfig  = networkConfig;
+    this.mode           = mode;
+    this.normalise      = normalise;
   }
 }
 

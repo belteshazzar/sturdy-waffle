@@ -40,7 +40,8 @@ function evalOp(opTok, args) {
  */
 function randomTree(depth, opToks) {
   if (depth === 0) {
-    return { type: 'value', value: Math.random() < 0.5 ? 0 : 1 };
+    // Use TOKEN.V0 / TOKEN.V1 explicitly so leaf values are always token integers
+    return { type: 'value', value: Math.random() < 0.5 ? TOKEN.V0 : TOKEN.V1 };
   }
   const opTok = opToks[Math.floor(Math.random() * opToks.length)];
   const arity = ARITY[opTok];

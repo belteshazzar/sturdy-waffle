@@ -47,32 +47,21 @@ function makeFastBoolBrain() {
     maxMutations:          6,
   });
 
+  const truthTable = {
+    AND:  [[0,0,0],[0,1,0],[1,0,0],[1,1,1]],
+    OR:   [[0,0,0],[0,1,1],[1,0,1],[1,1,1]],
+    XOR:  [[0,0,0],[0,1,1],[1,0,1],[1,1,0]],
+  };
+
   const gates = ['AND', 'OR', 'NOT', 'XOR'];
   for (const name of gates) {
     const domain = `boolean.${name}`;
-    const rows   = name === 'NOT'
-      ? [{ input: [0], output: [1] }, { input: [1], output: [0] }]
-      : [
-          { input: [0, 0], output: [name === 'AND' ? 0 : 0] },
-          { input: [0, 1], output: [name === 'AND' ? 0 : 1] },
-          { input: [1, 0], output: [name === 'AND' ? 0 : 1] },
-          { input: [1, 1], output: [name === 'AND' ? 1 : (name === 'XOR' ? 0 : 1)] },
-        ];
-
-    // Build correct truth table for every gate
-    const truthTable = {
-      AND:  [[0,0,0],[0,1,0],[1,0,0],[1,1,1]],
-      OR:   [[0,0,0],[0,1,1],[1,0,1],[1,1,1]],
-      XOR:  [[0,0,0],[0,1,1],[1,0,1],[1,1,0]],
-    };
-
     let trainingData;
     if (name === 'NOT') {
       trainingData = [{ input: [0], output: [1] }, { input: [1], output: [0] }];
     } else {
       trainingData = truthTable[name].map(([a, b, out]) => ({ input: [a, b], output: [out] }));
     }
-
     brain.learn(new Lesson({ name, domain, trainingData }));
   }
   return brain;

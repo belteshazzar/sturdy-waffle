@@ -85,11 +85,16 @@ class BrainRegion extends EventEmitter {
       : Math.max(6, Math.min(32, inSize * 6));
 
     const netConfig = lesson.networkConfig || {};
+    // Default output activation:
+    //   multiclass → softmax  (proper probability distribution, cross-entropy gradient)
+    //   regression → linear   (caller sets via networkConfig)
+    //   all others → sigmoid
+    const defaultOutputActivation = lesson.mode === 'multiclass' ? 'softmax' : 'sigmoid';
     this.network = new NeuralNetwork({
       architecture:     [inSize, hidden, outSize],
       learningRate:     this.config.baseLearningRate,
       hiddenActivation: netConfig.hiddenActivation || 'sigmoid',
-      outputActivation: netConfig.outputActivation || 'sigmoid',
+      outputActivation: netConfig.outputActivation || defaultOutputActivation,
     });
 
     // Pre-compute normalised copies of the training and validation sets.
@@ -142,12 +147,20 @@ class BrainRegion extends EventEmitter {
 
   /**
    * Choose the appropriate accuracy metric based on the lesson mode.
-   * 'regression' uses a tolerance-based continuous metric;
+   * 'regression'  uses a tolerance-based continuous metric;
+   * 'multiclass'  uses argmax-based accuracy for one-hot outputs;
+   * 'multilabel'  uses Hamming (per-label) accuracy for multi-label outputs;
    * 'classification' (default) uses exact binary matching.
    */
   _measureAccuracy(data) {
     if (this.lesson.mode === 'regression') {
       return this.network.regressionAccuracy(data, this.config.regressionTolerance);
+    }
+    if (this.lesson.mode === 'multiclass') {
+      return this.network.multiclassAccuracy(data);
+    }
+    if (this.lesson.mode === 'multilabel') {
+      return this.network.hammingAccuracy(data);
     }
     return this.network.accuracy(data);
   }
@@ -322,6 +335,34 @@ class BrainRegion extends EventEmitter {
    * the binary output itself is never denormalised.
    */
   predictBinary(input, threshold = 0.5) {
+    const normInput = this._normalizeInput(input);
+    return this.network.predictBinary(normInput, threshold);
+  }
+
+  /**
+   * Return the argmax index of the output vector.  Used for multi-class
+   * classification regions where the output is a one-hot encoded vector.
+   *
+   * @param {number[]} input  Raw input (normalisation applied automatically)
+   * @returns {number}  Index of the predicted class
+   */
+  predictArgmax(input) {
+    const normInput = this._normalizeInput(input);
+    return this.network.predictArgmax(normInput);
+  }
+
+  /**
+   * Return a thresholded (0/1) array where each element is independently
+   * binarised.  Used for multi-label classification regions where multiple
+   * output labels can be active simultaneously.
+   *
+   * Input normalisation is applied automatically.
+   *
+   * @param {number[]} input      Raw input
+   * @param {number}   [threshold=0.5]
+   * @returns {number[]}  0/1 per-label array
+   */
+  predictMultiLabel(input, threshold = 0.5) {
     const normInput = this._normalizeInput(input);
     return this.network.predictBinary(normInput, threshold);
   }

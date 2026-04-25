@@ -175,6 +175,42 @@ describe('BrainRegion — normalisation helpers', () => {
     expect(region.network.hiddenActivation).toBe('tanh');
     expect(region.network.outputActivation).toBe('linear');
   });
+
+  test('regression lessons start with higher hidden capacity than classification', () => {
+    const sharedData = [
+      { input: [0, 0], output: [0] },
+      { input: [0, 1], output: [1] },
+      { input: [1, 0], output: [1] },
+      { input: [1, 1], output: [2] },
+    ];
+
+    const regressionRegion = new BrainRegion({
+      domain: 'math.ADD',
+      lesson: new Lesson({
+        name: 'ADD',
+        domain: 'math.ADD',
+        trainingData: sharedData,
+        mode: 'regression',
+        normalise: { outputRange: [0, 2] },
+        networkConfig: { hiddenActivation: 'tanh', outputActivation: 'linear' },
+      }),
+    });
+
+    const classificationRegion = new BrainRegion({
+      domain: 'boolean.OR',
+      lesson: new Lesson({
+        name: 'OR',
+        domain: 'boolean.OR',
+        trainingData: sharedData.map(({ input, output }) => ({
+          input,
+          output: [output[0] > 0 ? 1 : 0],
+        })),
+      }),
+    });
+
+    expect(regressionRegion.network.architecture[1])
+      .toBeGreaterThan(classificationRegion.network.architecture[1]);
+  });
 });
 
 // ── 4. Brain.evaluate — explicit domain on expression nodes ──────────────────
@@ -221,6 +257,71 @@ describe('Brain — evaluate with explicit domain', () => {
       op: 'ADD', domain: 'math.ADD',
       inputs: [{ value: 0.3 }, { value: 0.5 }],
     })).toThrow();
+  });
+
+  test('evaluate can resolve a unique non-boolean op without explicit domain', () => {
+    const brain = new Brain({
+      defaultTargetAccuracy: 0.7,
+      regressionTolerance:   0.08,
+      epochsPerRound:        200,
+      maxEpochsTotal:        6000,
+      maxMutations:          6,
+    });
+
+    const pts = [0, 0.25, 0.5, 0.75, 1];
+    const addData = [];
+    for (const a of pts) for (const b of pts) addData.push({ input: [a, b], output: [a + b] });
+
+    brain.learn(new Lesson({
+      name:         'ADD',
+      domain:       'math.ADD',
+      trainingData: addData,
+      mode:         'regression',
+      normalise:    { outputRange: [0, 2] },
+      networkConfig: { hiddenActivation: 'tanh', outputActivation: 'linear' },
+    }));
+
+    const result = brain.evaluate({
+      op: 'ADD',
+      inputs: [{ value: 0.2 }, { value: 0.3 }],
+    });
+    expect(typeof result).toBe('number');
+    expect(result).toBeGreaterThan(-0.1);
+    expect(result).toBeLessThan(2.1);
+  });
+
+  test('evaluate requires explicit domain when multiple learned domains share an op', () => {
+    const brain = new Brain({
+      defaultTargetAccuracy: 0.6,
+      regressionTolerance:   0.1,
+      epochsPerRound:        100,
+      maxEpochsTotal:        3000,
+      maxMutations:          4,
+    });
+
+    const data = [
+      { input: [0, 0], output: [0] },
+      { input: [0, 1], output: [1] },
+      { input: [1, 0], output: [1] },
+      { input: [1, 1], output: [2] },
+    ];
+
+    const mkLesson = domain => new Lesson({
+      name:         domain,
+      domain,
+      trainingData: data,
+      mode:         'regression',
+      normalise:    { outputRange: [0, 2] },
+      networkConfig: { hiddenActivation: 'tanh', outputActivation: 'linear' },
+    });
+
+    brain.learn(mkLesson('math.ADD'));
+    brain.learn(mkLesson('algebra.ADD'));
+
+    expect(() => brain.evaluate({
+      op: 'ADD',
+      inputs: [{ value: 0.2 }, { value: 0.3 }],
+    })).toThrow(/Unable to resolve domain/);
   });
 
   test('evaluate returns literal value unchanged', () => {

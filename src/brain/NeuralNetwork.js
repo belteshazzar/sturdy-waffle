@@ -72,7 +72,15 @@ class NeuralNetwork {
     for (const layer of this.layers) {
       const z = vecAdd(matVecMul(layer.weights, current), layer.biases);
       zValues.push(z);
-      current = z.map(v => activate(v, layer.activation));
+      if (layer.activation === 'softmax') {
+        // Softmax is a vector-level operation — subtract max for numerical stability
+        const maxZ = Math.max(...z);
+        const exps = z.map(v => Math.exp(v - maxZ));
+        const sum  = exps.reduce((a, b) => a + b, 0);
+        current = exps.map(v => v / sum);
+      } else {
+        current = z.map(v => activate(v, layer.activation));
+      }
       activations.push(current);
     }
 
@@ -111,10 +119,17 @@ class NeuralNetwork {
     const numLayers = this.layers.length;
     const deltas    = new Array(numLayers);
 
-    // Output-layer delta: δ = (a − y) · σ'(z)
-    deltas[numLayers - 1] = activations[numLayers].map((a, i) =>
-      (a - target[i]) * activatePrime(zValues[numLayers - 1][i], this.layers[numLayers - 1].activation)
-    );
+    // Output-layer delta.
+    // For softmax output, the combined softmax + cross-entropy gradient
+    // simplifies to δ = a − y (the σ'(z) term cancels with the Jacobian).
+    // For all other activations: δ = (a − y) · σ'(z)  (standard MSE backprop).
+    if (this.layers[numLayers - 1].activation === 'softmax') {
+      deltas[numLayers - 1] = activations[numLayers].map((a, i) => a - target[i]);
+    } else {
+      deltas[numLayers - 1] = activations[numLayers].map((a, i) =>
+        (a - target[i]) * activatePrime(zValues[numLayers - 1][i], this.layers[numLayers - 1].activation)
+      );
+    }
 
     // Hidden-layer deltas (backpropagate)
     for (let l = numLayers - 2; l >= 0; l--) {
@@ -165,10 +180,14 @@ class NeuralNetwork {
     const numLayers = this.layers.length;
     const deltas    = new Array(numLayers);
 
-    // Output-layer delta: δ = (a − y) · σ'(z)
-    deltas[numLayers - 1] = activations[numLayers].map((a, i) =>
-      (a - target[i]) * activatePrime(zValues[numLayers - 1][i], this.layers[numLayers - 1].activation)
-    );
+    // Output-layer delta — same softmax special-case as backward()
+    if (this.layers[numLayers - 1].activation === 'softmax') {
+      deltas[numLayers - 1] = activations[numLayers].map((a, i) => a - target[i]);
+    } else {
+      deltas[numLayers - 1] = activations[numLayers].map((a, i) =>
+        (a - target[i]) * activatePrime(zValues[numLayers - 1][i], this.layers[numLayers - 1].activation)
+      );
+    }
 
     // Hidden-layer deltas
     for (let l = numLayers - 2; l >= 0; l--) {
@@ -310,6 +329,34 @@ class NeuralNetwork {
       if (predicted === targetIdx) correct++;
     }
     return correct / samples.length;
+  }
+
+  /**
+   * Per-label (Hamming) accuracy for multi-label classification tasks.
+   *
+   * Unlike `accuracy()` (which requires all labels to match exactly) and
+   * `multiclassAccuracy()` (which requires a single correct class), Hamming
+   * accuracy measures the fraction of **individual** label predictions that
+   * are correct.  This is the standard metric for multi-label problems where
+   * a sample may belong to several classes simultaneously.
+   *
+   * Formula: correct_labels / total_labels
+   *
+   * @param {Array<{input: number[], output: number[]}>} samples
+   * @param {number} [threshold=0.5]  Per-label binarisation threshold
+   * @returns {number}  0.0 – 1.0
+   */
+  hammingAccuracy(samples, threshold = 0.5) {
+    let correctLabels = 0;
+    let totalLabels   = 0;
+    for (const sample of samples) {
+      const predicted = this.predictBinary(sample.input, threshold);
+      for (let i = 0; i < predicted.length; i++) {
+        if (predicted[i] === sample.output[i]) correctLabels++;
+        totalLabels++;
+      }
+    }
+    return totalLabels === 0 ? 0 : correctLabels / totalLabels;
   }
 
   // ── Structural mutation ────────────────────────────────────────────────────

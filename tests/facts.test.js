@@ -271,7 +271,7 @@ describe('Brain — queryFact', () => {
   test('queryFact throws for unknown predicate (no region)', () => {
     const brain = fastBrain();
     brain.learnFacts(makeSimpleFacts());
-    expect(() => brain.queryFact('bird', 'canBreath')).toThrow();
+    expect(() => brain.queryFact('bird', 'canBreathe')).toThrow();
   });
 });
 

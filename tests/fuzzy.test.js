@@ -67,8 +67,10 @@ describe('Fuzzy — syllabus structure', () => {
   test('training data covers the full [0,1] range', () => {
     for (const lesson of fuzzySyllabus.lessons) {
       const outputs = lesson.trainingData.map(s => s.output[0]);
-      expect(Math.min(...outputs)).toBeCloseTo(0, 5);
-      expect(Math.max(...outputs)).toBeCloseTo(1, 5);
+      const minOut  = outputs.reduce((m, v) => Math.min(m, v), Infinity);
+      const maxOut  = outputs.reduce((m, v) => Math.max(m, v), -Infinity);
+      expect(minOut).toBeCloseTo(0, 5);
+      expect(maxOut).toBeCloseTo(1, 5);
     }
   });
 

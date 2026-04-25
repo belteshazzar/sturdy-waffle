@@ -21,8 +21,8 @@ const Lesson = require('../learning/Lesson');
  * This compact scalar representation lets a small classification network
  * memorise an arbitrary truth table over the subject vocabulary.
  *
- * Typical usage
- * ─────────────
+ * Typical usage — binary predicates
+ * ───────────────────────────────────
  *   const fb = new FactBase('Animals');
  *   fb.assert('bird',   'canFly',  true)
  *     .assert('cat',    'canFly',  false)
@@ -40,6 +40,16 @@ const Lesson = require('../learning/Lesson');
  *       { op: 'NOT', inputs: [{ fact: { subject: 'bird', predicate: 'hasFur' } }] },
  *     ],
  *   });  // → 1  (birds can fly AND do NOT have fur)
+ *
+ * Typical usage — categorical attributes (multi-class)
+ * ─────────────────────────────────────────────────────
+ *   const fb = new FactBase('Fruits');
+ *   fb.assertValue('apple',  'color', 'red')
+ *     .assertValue('banana', 'color', 'yellow')
+ *     .assertValue('lime',   'color', 'green');
+ *
+ *   brain.learnFacts(fb);                       // trains facts.color (3-output one-hot)
+ *   brain.queryAttribute('apple', 'color');      // → 'red'
  */
 class FactBase {
   /**
@@ -50,6 +60,9 @@ class FactBase {
     this.subjects   = [];          // ordered subject vocabulary
     this._facts     = Object.create(null);   // `${subject}:${predicate}` → 0|1
     this._predicates = [];         // ordered predicate vocabulary (insertion order)
+    // Multi-class / categorical attributes
+    this._attributeVocab = Object.create(null);  // attribute → string[] (ordered values)
+    this._attributeFacts = Object.create(null);  // `${subject}:${attribute}` → string
   }
 
   // ── Fact management ───────────────────────────────────────────────────────
@@ -79,6 +92,73 @@ class FactBase {
 
     this._facts[`${subject}:${predicate}`] = value ? 1 : 0;
     return this;
+  }
+
+  /**
+   * Assert a categorical (multi-class) attribute value for a subject.
+   *
+   * Unlike assert(), which stores boolean (0|1) facts, assertValue() stores a
+   * string value drawn from an automatically-inferred finite vocabulary.
+   * Calling assertValue() a second time with the same (subject, attribute) pair
+   * overwrites the previous value.
+   *
+   * The Brain can learn these attributes via brain.learnFacts() and answer
+   * open-ended "what is X?" questions via brain.queryAttribute(subject, attribute).
+   *
+   * Note: attribute names must not overlap with binary predicate names in the
+   * same FactBase, since both share the `facts.<name>` domain namespace.
+   *
+   * @param {string} subject    e.g. 'apple'
+   * @param {string} attribute  e.g. 'color'
+   * @param {string} value      e.g. 'red'
+   * @returns {this}  Returns the FactBase for method chaining.
+   */
+  assertValue(subject, attribute, value) {
+    if (typeof subject   !== 'string' || subject   === '') throw new Error('subject must be a non-empty string');
+    if (typeof attribute !== 'string' || attribute === '') throw new Error('attribute must be a non-empty string');
+    if (typeof value     !== 'string' || value     === '') throw new Error('value must be a non-empty string');
+
+    if (!this.subjects.includes(subject)) {
+      this.subjects.push(subject);
+    }
+    if (!Object.prototype.hasOwnProperty.call(this._attributeVocab, attribute)) {
+      this._attributeVocab[attribute] = [];
+    }
+    if (!this._attributeVocab[attribute].includes(value)) {
+      this._attributeVocab[attribute].push(value);
+    }
+
+    this._attributeFacts[`${subject}:${attribute}`] = value;
+    return this;
+  }
+
+  /**
+   * Retrieve the stored categorical value for a (subject, attribute) pair.
+   * Returns null when no value has been asserted.
+   *
+   * @param {string} subject
+   * @param {string} attribute
+   * @returns {string|null}
+   */
+  getValue(subject, attribute) {
+    const key = `${subject}:${attribute}`;
+    return Object.prototype.hasOwnProperty.call(this._attributeFacts, key)
+      ? this._attributeFacts[key]
+      : null;
+  }
+
+  /**
+   * Return the ordered list of distinct values observed for a given attribute.
+   * The order matches the one-hot encoding used by toLessons().
+   * Returns null when the attribute is unknown.
+   *
+   * @param {string} attribute
+   * @returns {string[]|null}
+   */
+  getAttributeVocabulary(attribute) {
+    return Object.prototype.hasOwnProperty.call(this._attributeVocab, attribute)
+      ? [...this._attributeVocab[attribute]]
+      : null;
   }
 
   /**
@@ -146,7 +226,8 @@ class FactBase {
       throw new Error('FactBase has no subjects — assert at least one fact before calling toLessons()');
     }
 
-    return this._predicates.map(predicate => {
+    // ── Binary predicate lessons (one output node per predicate) ─────────────
+    const binaryLessons = this._predicates.map(predicate => {
       const trainingData = this.subjects.map(subject => ({
         input:  [this.encodeSubject(subject)],
         output: [this.get(subject, predicate) ?? 0],
@@ -161,6 +242,33 @@ class FactBase {
         mode:        'classification',
       });
     });
+
+    // ── Categorical attribute lessons (one-hot multi-class) ──────────────────
+    // Each attribute produces one lesson whose output is a one-hot vector over
+    // the attribute's value vocabulary.  Subjects with no asserted value for the
+    // attribute receive an all-zeros output vector.
+    const attributeLessons = Object.entries(this._attributeVocab).map(([attribute, vocab]) => {
+      const trainingData = this.subjects.map(subject => {
+        const value  = this.getValue(subject, attribute);
+        const output = vocab.map(v => (v === value ? 1 : 0));
+        return {
+          input:  [this.encodeSubject(subject)],
+          output,
+        };
+      });
+
+      return new Lesson({
+        name:        `Attribute: ${attribute}`,
+        domain:      `facts.${attribute}`,
+        description: `Learn the '${attribute}' attribute for each subject (values: ${vocab.join(', ')}).`,
+        trainingData,
+        inputSize:   1,
+        outputSize:  vocab.length,
+        mode:        'multiclass',
+      });
+    });
+
+    return [...binaryLessons, ...attributeLessons];
   }
 
   // ── Accessors ─────────────────────────────────────────────────────────────
@@ -170,19 +278,33 @@ class FactBase {
     return [...this._predicates];
   }
 
+  /** Ordered list of categorical attribute names. */
+  get attributes() {
+    return Object.keys(this._attributeVocab);
+  }
+
   /** Total number of asserted facts (subject × predicate pairs). */
   get factCount() {
     return Object.keys(this._facts).length;
+  }
+
+  /** Total number of asserted attribute values (subject × attribute pairs). */
+  get attributeCount() {
+    return Object.keys(this._attributeFacts).length;
   }
 
   // ── Serialisation ─────────────────────────────────────────────────────────
 
   toJSON() {
     return {
-      name:       this.name,
-      subjects:   [...this.subjects],
-      predicates: [...this._predicates],
-      facts:      { ...this._facts },
+      name:           this.name,
+      subjects:       [...this.subjects],
+      predicates:     [...this._predicates],
+      facts:          { ...this._facts },
+      attributeVocab: Object.fromEntries(
+        Object.entries(this._attributeVocab).map(([k, v]) => [k, [...v]])
+      ),
+      attributeFacts: { ...this._attributeFacts },
     };
   }
 
@@ -191,6 +313,15 @@ class FactBase {
     fb.subjects      = [...(data.subjects   || [])];
     fb._predicates   = [...(data.predicates || [])];
     fb._facts        = Object.assign(Object.create(null), data.facts || {});
+    // Restore categorical attributes (present in new format; absent in old saves)
+    if (data.attributeVocab) {
+      for (const [attr, vocab] of Object.entries(data.attributeVocab)) {
+        fb._attributeVocab[attr] = [...vocab];
+      }
+    }
+    if (data.attributeFacts) {
+      Object.assign(fb._attributeFacts, data.attributeFacts);
+    }
     return fb;
   }
 }

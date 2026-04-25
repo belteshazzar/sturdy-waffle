@@ -21,9 +21,10 @@ class Lesson {
    * @param {string[]} [opts.tags]        Arbitrary labels for grouping
    * @param {object}   [opts.networkConfig]  Override the default network activations.
    *   e.g. `{ hiddenActivation: 'tanh', outputActivation: 'linear' }` for regression.
-   * @param {'classification'|'regression'} [opts.mode='classification']
-   *   'classification' uses binary-threshold accuracy; 'regression' uses
-   *   tolerance-based continuous accuracy.
+   * @param {'classification'|'regression'|'multiclass'} [opts.mode='classification']
+   *   'classification' uses binary per-output threshold accuracy (single output);
+   *   'regression' uses tolerance-based continuous accuracy;
+   *   'multiclass' uses argmax accuracy for one-hot encoded multi-class outputs.
    * @param {object}   [opts.normalise]   Optional scaling applied to raw data before
    *   feeding the network.  Both fields are independent and optional:
    *   `{ inputRange: [min, max], outputRange: [min, max] }`

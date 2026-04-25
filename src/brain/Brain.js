@@ -389,6 +389,44 @@ class Brain extends EventEmitter {
     return this.predictBinary([encoded], domain)[0];
   }
 
+  /**
+   * Query a categorical attribute and return the predicted string value.
+   *
+   * Encodes the subject using the stored FactBase vocabulary and runs the
+   * "facts.<attribute>" multi-class BrainRegion, then decodes the argmax
+   * index back to the corresponding label string.
+   *
+   * @param {string} subject    e.g. 'apple'
+   * @param {string} attribute  e.g. 'color'
+   * @returns {string}  The predicted value, e.g. 'red'
+   * @throws {Error}  When no FactBase is loaded, the attribute is unknown,
+   *                  or the corresponding region is missing.
+   */
+  queryAttribute(subject, attribute) {
+    if (!this.factBase) {
+      throw new Error(
+        'No FactBase is loaded. Call brain.learnFacts(factBase) first.'
+      );
+    }
+
+    const vocab = this.factBase.getAttributeVocabulary(attribute);
+    if (!vocab) {
+      throw new Error(
+        `Attribute '${attribute}' is not defined in the loaded FactBase.`
+      );
+    }
+
+    const encoded = this.factBase.encodeSubject(subject);
+    const domain  = `facts.${attribute}`;
+    const region  = this.router.route(domain);
+    if (!region) {
+      throw new Error(`No brain region found for domain '${domain}'.`);
+    }
+
+    const argmax = region.predictArgmax([encoded]);
+    return vocab[argmax];
+  }
+
   // ── Decomposition controller ──────────────────────────────────────────────
 
   /**
@@ -776,8 +814,10 @@ class Brain extends EventEmitter {
         name:           this.factBase.name,
         subjectCount:   this.factBase.subjects.length,
         predicateCount: this.factBase.predicates.length,
+        attributeCount: this.factBase.attributes.length,
         subjects:       [...this.factBase.subjects],
         predicates:     this.factBase.predicates,
+        attributes:     this.factBase.attributes,
       } : null,
     };
   }

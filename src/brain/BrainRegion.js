@@ -143,11 +143,15 @@ class BrainRegion extends EventEmitter {
   /**
    * Choose the appropriate accuracy metric based on the lesson mode.
    * 'regression' uses a tolerance-based continuous metric;
+   * 'multiclass' uses argmax-based accuracy for one-hot outputs;
    * 'classification' (default) uses exact binary matching.
    */
   _measureAccuracy(data) {
     if (this.lesson.mode === 'regression') {
       return this.network.regressionAccuracy(data, this.config.regressionTolerance);
+    }
+    if (this.lesson.mode === 'multiclass') {
+      return this.network.multiclassAccuracy(data);
     }
     return this.network.accuracy(data);
   }
@@ -324,6 +328,18 @@ class BrainRegion extends EventEmitter {
   predictBinary(input, threshold = 0.5) {
     const normInput = this._normalizeInput(input);
     return this.network.predictBinary(normInput, threshold);
+  }
+
+  /**
+   * Return the argmax index of the output vector.  Used for multi-class
+   * classification regions where the output is a one-hot encoded vector.
+   *
+   * @param {number[]} input  Raw input (normalisation applied automatically)
+   * @returns {number}  Index of the predicted class
+   */
+  predictArgmax(input) {
+    const normInput = this._normalizeInput(input);
+    return this.network.predictArgmax(normInput);
   }
 
   // ── Introspection ─────────────────────────────────────────────────────────

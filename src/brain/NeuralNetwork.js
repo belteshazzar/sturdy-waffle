@@ -275,6 +275,43 @@ class NeuralNetwork {
     return correct / samples.length;
   }
 
+  /**
+   * Return the index of the highest-valued output neuron (argmax).
+   * Used for multi-class classification where the output is a one-hot vector.
+   *
+   * @param {number[]} input
+   * @returns {number}  Index of the predicted class
+   */
+  predictArgmax(input) {
+    const output = this.predict(input);
+    let maxIdx = 0;
+    for (let i = 1; i < output.length; i++) {
+      if (output[i] > output[maxIdx]) maxIdx = i;
+    }
+    return maxIdx;
+  }
+
+  /**
+   * Fraction of samples whose predicted argmax matches the target argmax.
+   * Designed for multi-class (one-hot encoded) classification tasks.
+   *
+   * @param {Array<{input: number[], output: number[]}>} samples
+   * @returns {number}  0.0 – 1.0
+   */
+  multiclassAccuracy(samples) {
+    let correct = 0;
+    for (const sample of samples) {
+      const predicted = this.predictArgmax(sample.input);
+      // Target is one-hot; find the index of the 1
+      let targetIdx = 0;
+      for (let i = 1; i < sample.output.length; i++) {
+        if (sample.output[i] > sample.output[targetIdx]) targetIdx = i;
+      }
+      if (predicted === targetIdx) correct++;
+    }
+    return correct / samples.length;
+  }
+
   // ── Structural mutation ────────────────────────────────────────────────────
 
   /**

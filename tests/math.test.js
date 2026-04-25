@@ -286,7 +286,7 @@ describe('Brain — evaluate with explicit domain', () => {
       inputs: [{ value: 0.2 }, { value: 0.3 }],
     });
     expect(typeof result).toBe('number');
-    expect(Math.abs(result - 0.5)).toBeLessThan(0.15);
+    expect(Math.abs(result - 0.5)).toBeLessThan(0.12);
   });
 
   test('evaluate requires explicit domain when multiple learned domains share an op', () => {

@@ -66,6 +66,8 @@ class BrainRegion extends EventEmitter {
   _initializeNetwork(lesson) {
     const inSize  = lesson.inputSize;
     const outSize = lesson.outputSize;
+    // Empirical divisor that keeps regression boosts meaningful without
+    // over-inflating hidden layers on medium-sized datasets.
     const COMPLEXITY_SCALE_FACTOR = 2;
     const sampleCount = lesson.trainingData.length;
     const isRegression = lesson.mode === 'regression';
@@ -74,7 +76,7 @@ class BrainRegion extends EventEmitter {
       // Sub-linear complexity boost: larger datasets justify more starting
       // capacity, but sqrt growth avoids over-scaling hidden size.
       complexityBoost = Math.ceil(
-        Math.sqrt(Math.max(1, sampleCount)) / COMPLEXITY_SCALE_FACTOR
+        Math.sqrt(sampleCount) / COMPLEXITY_SCALE_FACTOR
       );
     }
     // Start with higher capacity for regression to better capture continuous math functions.

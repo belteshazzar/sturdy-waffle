@@ -9,6 +9,8 @@ const {
   WorkingMemory,
   DecompositionGraph,
   DecompositionController,
+  LearnedRouter,
+  StringEncoder,
   computeExpertTrace,
   tokens: decompTokens,
 } = require('../decomposition');
@@ -74,7 +76,9 @@ class Brain extends EventEmitter {
     this.knowledgeTree = Object.create(null);
     this.createdAt     = new Date().toISOString();
     this.version       = '1.0.0';
-    this.controller    = null;       // DecompositionController — null until initialised
+    this.controller    = null;   // DecompositionController — null until initialised
+    this.learnedRouter = null;   // LearnedRouter (Phase 3) — null until initialised
+    this.stringEncoder = null;   // StringEncoder (Phase 4) — null until trained
 
     if (this.config.verbose) {
       this._setupVerboseLogging();
@@ -334,18 +338,55 @@ class Brain extends EventEmitter {
   }
 
   /**
+   * Initialise a LearnedRouter (Phase 3) for domain routing from embeddings.
+   *
+   * The router maps an operator's embedding to the BrainRegion domain that
+   * should evaluate it.  It is trained during trainDecomposition() when the
+   * controller is in embedding mode.
+   *
+   * Requires the controller to be in embedding mode (embeddingDim set).
+   *
+   * @param {object} [opts]
+   * @param {string[]} [opts.domains]  Override the domain list (default: all TOKEN_DOMAIN values)
+   * @param {number}   [opts.confidenceThreshold=0.7]
+   * @returns {LearnedRouter}
+   */
+  initLearnedRouter(opts = {}) {
+    if (!this.controller || !this.controller.embeddingTable) {
+      throw new Error(
+        'initLearnedRouter() requires the controller to be in embedding mode. ' +
+        'Call initController({ embeddingDim: <n> }) first.'
+      );
+    }
+    const domains    = opts.domains || Object.values(decompTokens.TOKEN_DOMAIN);
+    const uniqueDomains = [...new Set(domains)];
+    this.learnedRouter = new LearnedRouter({
+      embeddingDim:        this.controller.embeddingTable.dim,
+      domains:             uniqueDomains,
+      confidenceThreshold: opts.confidenceThreshold || 0.7,
+    });
+    return this.learnedRouter;
+  }
+
+  /**
    * Train the decomposition controller via imitation learning (supervised
    * warm-start) followed by optional replay consolidation.
    *
    * Phase 1 — Imitation:
    *   For every problem in every curriculum stage, the expert "leftmost-first"
-   *   policy is run to generate a (stateVec, targetStart) trace.  The
-   *   controller is then trained on the aggregated trace via MSE regression.
+   *   policy is run to generate a (stateVec, rawSlots, validStarts, targetStart)
+   *   trace.  The controller is then trained on the aggregated trace via MSE.
+   *   When the controller is in embedding mode, the EmbeddingTable is also
+   *   updated jointly via backpropagation (Phase 1).
    *
    * Phase 2 — Replay:
    *   If the replay buffer already holds successful solve() episodes, a batch
    *   is sampled and used for additional supervised fine-tuning — reinforcing
    *   strategies that were empirically effective.
+   *
+   * Phase 3 — LearnedRouter (when learnedRouter is present):
+   *   Trains the router to map operator embeddings to domain names using the
+   *   TOKEN_DOMAIN ground-truth labels from the curriculum.
    *
    * Neuroscience analogue: imitation learning corresponds to procedural
    * memory encoding; replay consolidation corresponds to sleep-phase
@@ -356,6 +397,7 @@ class Brain extends EventEmitter {
    * @param {number} [opts.epochs=50]         Imitation training epochs
    * @param {number} [opts.replayBatch=32]    Replay sample size
    * @param {number} [opts.replayEpochs=5]    Replay fine-tuning epochs
+   * @param {number} [opts.routerEpochs=30]   Learned-router training epochs
    * @returns {{ exampleCount: number, stageCount: number }}
    */
   trainDecomposition(curriculum, opts = {}) {
@@ -363,6 +405,7 @@ class Brain extends EventEmitter {
       epochs       = 50,
       replayBatch  = 32,
       replayEpochs = 5,
+      routerEpochs = 30,
     } = opts;
 
     if (!this.controller) this.initController();
@@ -387,7 +430,12 @@ class Brain extends EventEmitter {
           }
         );
         for (const step of trace) {
-          allExamples.push({ stateVec: step.stateVec, targetStart: step.chosenStart });
+          allExamples.push({
+            stateVec:    step.stateVec,
+            rawSlots:    step.rawSlots,
+            validStarts: step.validStarts,
+            targetStart: step.chosenStart,
+          });
         }
       }
     }
@@ -397,6 +445,26 @@ class Brain extends EventEmitter {
     // Phase 2 — replay consolidation
     if (this.controller.replayBuffer.size >= replayBatch) {
       this.controller.replayTrain(replayBatch, replayEpochs);
+    }
+
+    // Phase 3 — train LearnedRouter from embedding table
+    if (this.learnedRouter && this.controller.embeddingTable) {
+      const routerExamples = [];
+      for (const stage of stages) {
+        for (const problem of stage.problems) {
+          for (const tok of problem.tokens) {
+            const domain = decompTokens.TOKEN_DOMAIN[tok];
+            if (!domain) continue;
+            const domainIdx = this.learnedRouter.domains.indexOf(domain);
+            if (domainIdx < 0) continue;
+            const opEmb = this.controller.embeddingTable.lookup(tok);
+            routerExamples.push({ opEmbedding: opEmb, domainIndex: domainIdx });
+          }
+        }
+      }
+      if (routerExamples.length > 0) {
+        this.learnedRouter.train(routerExamples, routerEpochs);
+      }
     }
 
     const result = { exampleCount: allExamples.length, stageCount: stages.length };
@@ -466,7 +534,16 @@ class Brain extends EventEmitter {
         break;
       }
 
-      const domain = decompTokens.TOKEN_DOMAIN[action.op];
+      // ── Phase 3: domain resolution ──────────────────────────────────────────
+      // Try LearnedRouter first; fall back to hard-coded TOKEN_DOMAIN map.
+      let domain = null;
+      if (this.learnedRouter && this.controller.embeddingTable) {
+        const opEmb  = this.controller.embeddingTable.lookup(action.op);
+        const result = this.learnedRouter.route(opEmb);
+        if (result.aboveThreshold) domain = result.domain;
+      }
+      if (!domain) domain = decompTokens.TOKEN_DOMAIN[action.op];
+
       if (!domain || !this.router.hasRoute(domain)) {
         throw new Error(
           `solve(): no trained specialist for domain '${domain}'. ` +
@@ -477,7 +554,8 @@ class Brain extends EventEmitter {
       const result = this.predictBinary(action.args, domain)[0];
 
       trace.push({
-        stateVec:    mem.toVector(),
+        stateVec:    mem.toVector(this.controller.embeddingTable || null),
+        rawSlots:    [...mem.slots],
         chosenStart: action.start,
         op:          action.op,
         args:        [...action.args],
@@ -506,6 +584,69 @@ class Brain extends EventEmitter {
     this.emit('decomposition:complete', { tokens, solved, answer, steps, graph: graphJSON });
 
     return { answer, solved, steps, graph: graphJSON };
+  }
+
+  // ── Phase 4: String encoder ───────────────────────────────────────────────
+
+  /**
+   * Train a StringEncoder (Phase 4) to convert human-readable expression
+   * strings to token IDs using a character-level neural network.
+   *
+   * The training examples are extracted from the curriculum: for every problem
+   * (which now carries a `string` field), each word in the string is paired
+   * with the corresponding token ID from the `tokens` array.
+   *
+   * After training, `brain.solveString(expr)` accepts raw expression strings
+   * without requiring callers to know the integer TOKEN vocabulary.
+   *
+   * @param {DecompositionCurriculum} curriculum
+   * @param {object} [opts]
+   * @param {number} [opts.epochs=40]  Training epochs for the encoder
+   * @returns {StringEncoder}
+   */
+  trainStringEncoder(curriculum, opts = {}) {
+    const { epochs = 40 } = opts;
+
+    if (!this.stringEncoder) {
+      this.stringEncoder = new StringEncoder();
+    }
+
+    const examples = [];
+    for (const stage of curriculum.getStages()) {
+      for (const problem of stage.problems) {
+        if (!problem.string) continue;
+        const words    = StringEncoder.splitWords(problem.string);
+        const tokenIds = problem.tokens;
+        const n        = Math.min(words.length, tokenIds.length);
+        for (let i = 0; i < n; i++) {
+          examples.push({ word: words[i], tokenId: tokenIds[i] });
+        }
+      }
+    }
+
+    this.stringEncoder.train(examples, epochs);
+    return this.stringEncoder;
+  }
+
+  /**
+   * Solve a human-readable expression string.
+   *
+   * When a trained `stringEncoder` is present, the string is converted to
+   * token IDs using the learned model.  Otherwise, a fast deterministic
+   * parser (StringEncoder.toTokenIds) is used as a fallback.
+   *
+   * @param {string} exprString  e.g. "AND(OR(1,0), NOT(0))"
+   * @param {object} [opts]      Forwarded to solve()
+   * @returns {{ answer, solved, steps, graph }}
+   */
+  solveString(exprString, opts = {}) {
+    let tokenIds;
+    if (this.stringEncoder) {
+      tokenIds = this.stringEncoder.encode(exprString);
+    } else {
+      tokenIds = StringEncoder.toTokenIds(exprString);
+    }
+    return this.solve(tokenIds, opts);
   }
 
 
@@ -538,7 +679,9 @@ class Brain extends EventEmitter {
    *   knowledgeTree: object,
    *   routerTree: object,
    *   regions: object,
-   *   controller: object | null
+   *   controller: object | null,
+   *   learnedRouter: object | null,
+   *   stringEncoder: object | null
    * }}
    */
   introspect() {
@@ -555,7 +698,9 @@ class Brain extends EventEmitter {
       knowledgeTree: this.knowledgeTree,
       routerTree:    this.router.getTreeStructure(),
       regions,
-      controller:    this.controller ? this.controller.getInfo() : null,
+      controller:    this.controller    ? this.controller.getInfo()    : null,
+      learnedRouter: this.learnedRouter ? this.learnedRouter.toJSON()  : null,
+      stringEncoder: this.stringEncoder ? this.stringEncoder.toJSON()  : null,
     };
   }
 
@@ -593,7 +738,9 @@ class Brain extends EventEmitter {
         domain,
         region: region.toJSON(),
       })),
-      controller: this.controller ? this.controller.toJSON() : null,
+      controller:    this.controller    ? this.controller.toJSON()    : null,
+      learnedRouter: this.learnedRouter ? this.learnedRouter.toJSON() : null,
+      stringEncoder: this.stringEncoder ? this.stringEncoder.toJSON() : null,
     };
   }
 
@@ -611,6 +758,12 @@ class Brain extends EventEmitter {
 
     if (data.controller) {
       brain.controller = DecompositionController.fromJSON(data.controller);
+    }
+    if (data.learnedRouter) {
+      brain.learnedRouter = LearnedRouter.fromJSON(data.learnedRouter);
+    }
+    if (data.stringEncoder) {
+      brain.stringEncoder = StringEncoder.fromJSON(data.stringEncoder);
     }
 
     return brain;

@@ -66,6 +66,23 @@ function treeToTokens(tree) {
 }
 
 /**
+ * Convert an expression tree to a human-readable prefix-notation string.
+ * Operator names are taken from TOKEN_NAMES; value tokens become '0' or '1'.
+ *
+ * Example: AND(OR(1,0), NOT(0))
+ *
+ * @param {{ type, value?, opTok?, children? }} tree
+ * @returns {string}
+ */
+function treeToString(tree) {
+  const { TOKEN_NAMES } = require('../../src/decomposition/tokens');
+  if (tree.type === 'value') return tree.value === 0 ? '0' : '1';
+  const name = TOKEN_NAMES[tree.opTok] || String(tree.opTok);
+  const args = tree.children.map(c => treeToString(c)).join(',');
+  return `${name}(${args})`;
+}
+
+/**
  * Evaluate an expression tree against the Boolean truth tables.
  * @param {{ type, value?, opTok?, children? }} tree
  * @returns {number} 0 or 1
@@ -122,20 +139,34 @@ class DecompositionCurriculum {
 
   /**
    * Stage 1: exhaustive depth-1 problems — every op × every truth-table row.
-   * @returns {Array<{ tokens: number[], answer: number }>}
+   *
+   * Each problem now also includes a `string` field with the human-readable
+   * prefix-notation expression (e.g. "AND(1,0)") for use by StringEncoder.
+   *
+   * @returns {Array<{ tokens: number[], answer: number, string: string }>}
    */
   generateDepth1() {
+    const { TOKEN_NAMES } = require('../../src/decomposition/tokens');
     const problems = [];
     for (const opTok of this.depth1Ops) {
-      const arity = ARITY[opTok];
+      const arity   = ARITY[opTok];
+      const opName  = TOKEN_NAMES[opTok];
       if (arity === 1) {
         for (const v of [0, 1]) {
-          problems.push({ tokens: [opTok, v], answer: evalOp(opTok, [v]) });
+          problems.push({
+            tokens: [opTok, v],
+            answer: evalOp(opTok, [v]),
+            string: `${opName}(${v})`,
+          });
         }
       } else {
         for (const a of [0, 1]) {
           for (const b of [0, 1]) {
-            problems.push({ tokens: [opTok, a, b], answer: evalOp(opTok, [a, b]) });
+            problems.push({
+              tokens: [opTok, a, b],
+              answer: evalOp(opTok, [a, b]),
+              string: `${opName}(${a},${b})`,
+            });
           }
         }
       }
@@ -145,7 +176,7 @@ class DecompositionCurriculum {
 
   /**
    * Stage 2: sampled depth-2 problems (one outer op + at least one inner op).
-   * @returns {Array<{ tokens: number[], answer: number }>}
+   * @returns {Array<{ tokens: number[], answer: number, string: string }>}
    */
   generateDepth2() {
     return this._generateSampled(2, this.depth2Ops, this.depth2Count);
@@ -153,7 +184,7 @@ class DecompositionCurriculum {
 
   /**
    * Stage 3: sampled depth-3 problems (two levels of nesting).
-   * @returns {Array<{ tokens: number[], answer: number }>}
+   * @returns {Array<{ tokens: number[], answer: number, string: string }>}
    */
   generateDepth3() {
     return this._generateSampled(3, this.depth3Ops, this.depth3Count);
@@ -172,7 +203,7 @@ class DecompositionCurriculum {
       const key    = JSON.stringify(tokens);
       if (!seen.has(key)) {
         seen.add(key);
-        problems.push({ tokens, answer: evalTree(tree) });
+        problems.push({ tokens, answer: evalTree(tree), string: treeToString(tree) });
       }
     }
     return problems;
@@ -203,4 +234,6 @@ module.exports = {
   decompositionCurriculum,
   /** Exported so callers can pass it directly to computeExpertTrace(). */
   evalOp,
+  /** Exported for testing and Phase 4 training data generation. */
+  treeToString,
 };

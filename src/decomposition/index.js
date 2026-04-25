@@ -55,11 +55,15 @@ function computeExpertTrace(inputTokens, evalFn, maxSlots = 16) {
     candidates.sort((a, b) => a.start - b.start);
     const action = candidates[0];
 
-    const stateVec = mem.toVector();
-    const result   = evalFn(action.op, action.args);
+    const stateVec    = mem.toVector();
+    const rawSlots    = [...mem.slots];          // full maxSlots-length raw token array
+    const validStarts = candidates.map(c => c.start);  // all valid positions at this state
+    const result      = evalFn(action.op, action.args);
 
     trace.push({
       stateVec,
+      rawSlots,
+      validStarts,
       chosenStart: action.start,
       op:          action.op,
       args:        [...action.args],
@@ -82,6 +86,11 @@ module.exports = {
   DecompositionGraph,
   DecompositionController,
   ReplayBuffer,
+  EmbeddingTable:   require('./EmbeddingTable'),
+  GatingNetwork:    require('./GatingNetwork'),
+  LearnedRouter:    require('./LearnedRouter'),
+  StringEncoder:    require('./StringEncoder'),
+  VQCodebook:       require('./VQCodebook'),
   tokens,
   computeExpertTrace,
 };

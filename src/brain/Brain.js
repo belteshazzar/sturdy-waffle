@@ -212,8 +212,10 @@ class Brain extends EventEmitter {
   _resolveExpressionDomain(expression) {
     if (expression.domain) return expression.domain;
 
-    const op = String(expression.op || '').toUpperCase();
-    if (!op) return null;
+    if (expression.op === undefined || expression.op === null || expression.op === '') {
+      return null;
+    }
+    const op = String(expression.op).toUpperCase();
 
     const matchingDomains = Array
       .from(this.regions.keys())

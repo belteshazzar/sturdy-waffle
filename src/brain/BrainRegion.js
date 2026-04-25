@@ -67,7 +67,7 @@ class BrainRegion extends EventEmitter {
     const inSize  = lesson.inputSize;
     const outSize = lesson.outputSize;
     const COMPLEXITY_SCALE_FACTOR = 2;
-    const sampleCount = Array.isArray(lesson.trainingData) ? lesson.trainingData.length : 0;
+    const sampleCount = lesson.trainingData.length;
     const isRegression = lesson.mode === 'regression';
     let complexityBoost = 0;
     if (isRegression) {

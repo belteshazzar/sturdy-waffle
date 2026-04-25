@@ -215,10 +215,10 @@ class Brain extends EventEmitter {
     if (expression.op === undefined || expression.op === null || expression.op === '') {
       return null;
     }
-    if (typeof expression.op !== 'string' && typeof expression.op !== 'number') {
+    if (typeof expression.op !== 'string') {
       return null;
     }
-    const op = String(expression.op).toUpperCase();
+    const op = expression.op.toUpperCase();
 
     const matchingDomains = Array
       .from(this.regions.keys())

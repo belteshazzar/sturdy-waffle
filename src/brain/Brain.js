@@ -201,6 +201,42 @@ class Brain extends EventEmitter {
   }
 
   /**
+   * Resolve which domain should handle an expression node.
+   * Priority:
+   *   1) Explicit node domain
+   *   2) Unique learned domain whose last segment matches the op (e.g. "*.ADD")
+   *   3) Legacy boolean.<OP> fallback
+   * Returns null when resolution is ambiguous or no region exists.
+   * @private
+   */
+  _resolveExpressionDomain(expression) {
+    if (expression.domain) return expression.domain;
+
+    if (expression.op === undefined || expression.op === null || expression.op === '') {
+      return null;
+    }
+    if (typeof expression.op !== 'string') {
+      return null;
+    }
+    const op = expression.op.toUpperCase();
+
+    const matchingDomains = Array
+      .from(this.regions.keys())
+      .filter(domain => domain.split('.').pop() === op);
+
+    if (matchingDomains.length === 1) {
+      return matchingDomains[0];
+    }
+
+    const legacyBooleanDomain = `boolean.${op}`;
+    if (this.router.hasRoute(legacyBooleanDomain)) {
+      return legacyBooleanDomain;
+    }
+
+    return null;
+  }
+
+  /**
    * Recursively evaluate a nested expression tree using the appropriate brain
    * region for each node.
    *
@@ -233,9 +269,14 @@ class Brain extends EventEmitter {
 
     const evaluatedInputs = expression.inputs.map(e => this.evaluate(e));
 
-    // Support an explicit domain on the node; fall back to boolean.<OP> for
-    // backwards compatibility with existing boolean expression trees.
-    const domain = expression.domain || `boolean.${expression.op.toUpperCase()}`;
+    const domain = this._resolveExpressionDomain(expression);
+    if (!domain) {
+      throw new Error(
+        `Unable to resolve domain for operation '${expression.op}'. ` +
+        'Provide expression.domain explicitly or train exactly one matching domain.'
+      );
+    }
+
     const region = this.router.route(domain);
     if (!region) throw new Error(`No brain region found for domain '${domain}'`);
 

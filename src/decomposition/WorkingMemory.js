@@ -127,25 +127,49 @@ class WorkingMemory {
   // ── Neural encoding ───────────────────────────────────────────────────────
 
   /**
-   * Encode the current slot state as a flat float32 feature vector suitable
-   * for input to the DecompositionController's neural network.
+   * Encode the current slot state as a flat feature vector suitable for input
+   * to the DecompositionController's neural network.
    *
-   * Each of the `maxSlots` slots is one-hot encoded over the `VOCAB_SIZE`
-   * token classes (indices 0..8 correspond to V0..XNOR).  A NULL slot is
-   * encoded as an all-zeros segment.
+   * Two modes:
    *
-   * Total length: maxSlots × VOCAB_SIZE
+   *  1. One-hot mode (default, `embeddingTable` omitted or null):
+   *     Each slot is one-hot encoded over VOCAB_SIZE token classes (0..8).
+   *     A NULL slot is an all-zeros segment.
+   *     Total length: maxSlots × VOCAB_SIZE
    *
+   *  2. Embedding mode (`embeddingTable` provided):
+   *     Each slot is looked up in the EmbeddingTable to produce a dense vector
+   *     of size `embeddingTable.dim`.  NULL slots produce all-zeros.
+   *     Total length: maxSlots × embeddingTable.dim
+   *
+   * The optional `embeddingTable` parameter is fully backward-compatible:
+   * callers that omit it continue to receive the original one-hot encoding.
+   *
+   * @param {EmbeddingTable|null} [embeddingTable]
    * @returns {number[]}
    */
-  toVector() {
-    const vec = new Array(this.maxSlots * VOCAB_SIZE).fill(0);
-    for (let i = 0; i < this.maxSlots; i++) {
-      const tok = this.slots[i];
-      if (tok >= 0 && tok < VOCAB_SIZE) {
-        vec[i * VOCAB_SIZE + tok] = 1;
+  toVector(embeddingTable) {
+    if (!embeddingTable) {
+      // ── Original one-hot encoding ──────────────────────────────────────────
+      const vec = new Array(this.maxSlots * VOCAB_SIZE).fill(0);
+      for (let i = 0; i < this.maxSlots; i++) {
+        const tok = this.slots[i];
+        if (tok >= 0 && tok < VOCAB_SIZE) {
+          vec[i * VOCAB_SIZE + tok] = 1;
+        }
+        // NULL (tok === -1) → all-zeros segment (already 0)
       }
-      // NULL (tok === -1) → all-zeros segment (already 0)
+      return vec;
+    }
+
+    // ── Dense embedding encoding ───────────────────────────────────────────
+    const dim = embeddingTable.dim;
+    const vec = new Array(this.maxSlots * dim).fill(0);
+    for (let i = 0; i < this.maxSlots; i++) {
+      const emb = embeddingTable.lookup(this.slots[i]);
+      for (let k = 0; k < dim; k++) {
+        vec[i * dim + k] = emb[k];
+      }
     }
     return vec;
   }

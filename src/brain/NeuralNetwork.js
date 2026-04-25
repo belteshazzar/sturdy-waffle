@@ -148,6 +148,67 @@ class NeuralNetwork {
     return output.reduce((sum, a, i) => sum + 0.5 * (a - target[i]) ** 2, 0);
   }
 
+  /**
+   * Perform one backpropagation step like backward(), but additionally return
+   * the gradient of the loss with respect to the **input** vector.
+   *
+   * This is used by DecompositionController to propagate gradients back into
+   * the EmbeddingTable so that embeddings are updated jointly with the policy
+   * network weights.
+   *
+   * @param {number[]} input
+   * @param {number[]} target
+   * @returns {{ loss: number, inputGrad: number[] }}
+   */
+  backwardWithInputGrad(input, target) {
+    const { activations, zValues } = this.forward(input);
+    const numLayers = this.layers.length;
+    const deltas    = new Array(numLayers);
+
+    // Output-layer delta: δ = (a − y) · σ'(z)
+    deltas[numLayers - 1] = activations[numLayers].map((a, i) =>
+      (a - target[i]) * activatePrime(zValues[numLayers - 1][i], this.layers[numLayers - 1].activation)
+    );
+
+    // Hidden-layer deltas
+    for (let l = numLayers - 2; l >= 0; l--) {
+      const nextLayer    = this.layers[l + 1];
+      const currentLayer = this.layers[l];
+      deltas[l] = zValues[l].map((z, j) => {
+        const error = nextLayer.weights.reduce(
+          (sum, row, i) => sum + row[j] * deltas[l + 1][i],
+          0
+        );
+        return error * activatePrime(z, currentLayer.activation);
+      });
+    }
+
+    // Apply gradient descent
+    for (let l = 0; l < numLayers; l++) {
+      const layer    = this.layers[l];
+      const prevActs = activations[l];
+      for (let i = 0; i < layer.weights.length; i++) {
+        for (let j = 0; j < layer.weights[i].length; j++) {
+          layer.weights[i][j] -= this.learningRate * deltas[l][i] * prevActs[j];
+        }
+        layer.biases[i] -= this.learningRate * deltas[l][i];
+      }
+    }
+
+    // Compute input gradient: dL/dinput[j] = Σ_i (delta[0][i] * W[0][i][j])
+    const firstLayer = this.layers[0];
+    const inputGrad  = new Array(input.length).fill(0);
+    for (let i = 0; i < firstLayer.weights.length; i++) {
+      for (let j = 0; j < firstLayer.weights[i].length; j++) {
+        inputGrad[j] += deltas[0][i] * firstLayer.weights[i][j];
+      }
+    }
+
+    const output = activations[numLayers];
+    const loss   = output.reduce((sum, a, i) => sum + 0.5 * (a - target[i]) ** 2, 0);
+    return { loss, inputGrad };
+  }
+
   // ── Training ──────────────────────────────────────────────────────────────
 
   /**

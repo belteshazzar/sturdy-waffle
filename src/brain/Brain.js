@@ -3,6 +3,7 @@
 const { EventEmitter } = require('events');
 const BrainRegion      = require('./BrainRegion');
 const Router           = require('../routing/Router');
+const FactBase         = require('../knowledge/FactBase');
 
 // Decomposition modules (loaded lazily to avoid circular deps at startup)
 const {
@@ -79,6 +80,7 @@ class Brain extends EventEmitter {
     this.controller    = null;   // DecompositionController — null until initialised
     this.learnedRouter = null;   // LearnedRouter (Phase 3) — null until initialised
     this.stringEncoder = null;   // StringEncoder (Phase 4) — null until trained
+    this.factBase      = null;   // FactBase — null until learnFacts() is called
 
     if (this.config.verbose) {
       this._setupVerboseLogging();
@@ -274,16 +276,33 @@ class Brain extends EventEmitter {
    *   • Regions trained in 'regression' mode return the raw continuous prediction,
    *     allowing continuous intermediate values to propagate through the tree.
    *
+   * An additional terminal node form is supported for declarative fact lookups:
+   *   • Fact query:     { fact: { subject: <string>, predicate: <string> } }
+   *     Requires a FactBase to be loaded via learnFacts() and the corresponding
+   *     facts.<predicate> region to be trained.  Returns 0 or 1.
+   *
    * @param {object} expression
    * @returns {number}
    */
   evaluate(expression) {
+    // ── Fact lookup node ────────────────────────────────────────────────────
+    if (expression.fact !== undefined) {
+      if (!this.factBase) {
+        throw new Error(
+          'Expression contains a fact node but no FactBase is loaded. ' +
+          'Call brain.learnFacts(factBase) first.'
+        );
+      }
+      const { subject, predicate } = expression.fact;
+      return this.queryFact(subject, predicate);
+    }
+
     if (expression.value !== undefined) {
       return expression.value;
     }
 
     if (!expression.op) {
-      throw new Error('Expression node must have either a "value" or an "op" property');
+      throw new Error('Expression node must have either a "value", "fact", or an "op" property');
     }
 
     const evaluatedInputs = expression.inputs.map(e => this.evaluate(e));
@@ -316,6 +335,58 @@ class Brain extends EventEmitter {
   /** True if any region (trained or not) exists for this domain. */
   hasRegion(domain) {
     return this.regions.has(domain);
+  }
+
+  // ── Declarative knowledge (FactBase) ──────────────────────────────────────
+
+  /**
+   * Teach the Brain a FactBase — a set of ground-truth (subject, predicate)
+   * facts expressed as boolean values.
+   *
+   * For each predicate in the FactBase one classification Lesson is generated
+   * (domain: "facts.<predicate>") and learned via the standard learn() pathway.
+   * After this call the Brain can answer direct fact queries via queryFact() and
+   * can evaluate expression trees that contain { fact: { subject, predicate } }
+   * terminal nodes.
+   *
+   * The FactBase reference is stored on the Brain so that subject names can be
+   * resolved to their encoded scalar values at inference time.
+   *
+   * @param {FactBase} factBase
+   * @returns {Array<{ predicate: string, domain: string, trained: boolean, accuracy: number }>}
+   */
+  learnFacts(factBase) {
+    this.factBase = factBase;
+
+    const results = factBase.toLessons().map(lesson => ({
+      predicate: lesson.domain.split('.')[1],
+      domain:    lesson.domain,
+      ...this.learn(lesson),
+    }));
+
+    return results;
+  }
+
+  /**
+   * Query a single fact by name.
+   *
+   * Encodes the subject using the stored FactBase vocabulary and runs a binary
+   * prediction through the "facts.<predicate>" BrainRegion.
+   *
+   * @param {string} subject    e.g. 'bird'
+   * @param {string} predicate  e.g. 'canFly'
+   * @returns {0|1}
+   * @throws {Error}  When no FactBase is loaded or the predicate region is missing.
+   */
+  queryFact(subject, predicate) {
+    if (!this.factBase) {
+      throw new Error(
+        'No FactBase is loaded. Call brain.learnFacts(factBase) first.'
+      );
+    }
+    const encoded = this.factBase.encodeSubject(subject);
+    const domain  = `facts.${predicate}`;
+    return this.predictBinary([encoded], domain)[0];
   }
 
   // ── Decomposition controller ──────────────────────────────────────────────
@@ -701,6 +772,13 @@ class Brain extends EventEmitter {
       controller:    this.controller    ? this.controller.getInfo()    : null,
       learnedRouter: this.learnedRouter ? this.learnedRouter.toJSON()  : null,
       stringEncoder: this.stringEncoder ? this.stringEncoder.toJSON()  : null,
+      factBase:      this.factBase ? {
+        name:           this.factBase.name,
+        subjectCount:   this.factBase.subjects.length,
+        predicateCount: this.factBase.predicates.length,
+        subjects:       [...this.factBase.subjects],
+        predicates:     this.factBase.predicates,
+      } : null,
     };
   }
 
@@ -741,6 +819,7 @@ class Brain extends EventEmitter {
       controller:    this.controller    ? this.controller.toJSON()    : null,
       learnedRouter: this.learnedRouter ? this.learnedRouter.toJSON() : null,
       stringEncoder: this.stringEncoder ? this.stringEncoder.toJSON() : null,
+      factBase:      this.factBase      ? this.factBase.toJSON()      : null,
     };
   }
 
@@ -764,6 +843,9 @@ class Brain extends EventEmitter {
     }
     if (data.stringEncoder) {
       brain.stringEncoder = StringEncoder.fromJSON(data.stringEncoder);
+    }
+    if (data.factBase) {
+      brain.factBase = FactBase.fromJSON(data.factBase);
     }
 
     return brain;

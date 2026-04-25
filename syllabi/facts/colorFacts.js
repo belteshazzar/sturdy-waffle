@@ -108,9 +108,8 @@ const lessons = colorFacts.toLessons();
  *   "Is an apple red?"    → brain.queryFact('apple',  'isRed')    // → 1
  *   "Is a banana yellow?" → brain.queryFact('banana', 'isYellow') // → 1
  *
- * Limitation: the Brain cannot yet answer open-ended "what color is X?"
- * queries (that requires multi-class support).  Query each color predicate
- * independently and check which one returns 1.
+ * For open-ended "what color is X?" queries, use a FactBase with
+ * assertValue() and brain.queryAttribute() instead.
  */
 const colorSyllabus = new Syllabus({
   name:        'Fruit and Food Colors',

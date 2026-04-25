@@ -85,6 +85,11 @@ describe('FactBase — assertValue', () => {
     expect(() => new FactBase().assertValue('apple', 'color', 1)).toThrow();
   });
 
+  test('throws when attribute name conflicts with an existing binary predicate', () => {
+    const fb = new FactBase().assert('bird', 'canFly', true);
+    expect(() => fb.assertValue('bird', 'canFly', 'yes')).toThrow(/already defined as a binary predicate/);
+  });
+
   test('overwriting a value replaces it', () => {
     const fb = new FactBase();
     fb.assertValue('apple', 'color', 'red');
@@ -97,6 +102,20 @@ describe('FactBase — assertValue', () => {
     fb.assertValue('apple', 'color', 'red');
     fb.assertValue('apple', 'color', 'green');
     expect(fb.subjects.filter(s => s === 'apple')).toHaveLength(1);
+  });
+});
+
+// ── FactBase — name conflict guards ──────────────────────────────────────────
+
+describe('FactBase — name conflict detection', () => {
+  test('assert throws when name conflicts with an existing attribute', () => {
+    const fb = new FactBase().assertValue('apple', 'color', 'red');
+    expect(() => fb.assert('apple', 'color', true)).toThrow(/already defined as a categorical attribute/);
+  });
+
+  test('assertValue throws when name conflicts with an existing predicate', () => {
+    const fb = new FactBase().assert('bird', 'canFly', true);
+    expect(() => fb.assertValue('bird', 'canFly', 'yes')).toThrow(/already defined as a binary predicate/);
   });
 });
 

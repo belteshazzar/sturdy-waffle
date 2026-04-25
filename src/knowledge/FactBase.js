@@ -82,6 +82,12 @@ class FactBase {
   assert(subject, predicate, value = true) {
     if (typeof subject   !== 'string' || subject   === '') throw new Error('subject must be a non-empty string');
     if (typeof predicate !== 'string' || predicate === '') throw new Error('predicate must be a non-empty string');
+    if (Object.prototype.hasOwnProperty.call(this._attributeVocab, predicate)) {
+      throw new Error(
+        `'${predicate}' is already defined as a categorical attribute. ` +
+        'Predicate and attribute names must be distinct.'
+      );
+    }
 
     if (!this.subjects.includes(subject)) {
       this.subjects.push(subject);
@@ -117,6 +123,12 @@ class FactBase {
     if (typeof subject   !== 'string' || subject   === '') throw new Error('subject must be a non-empty string');
     if (typeof attribute !== 'string' || attribute === '') throw new Error('attribute must be a non-empty string');
     if (typeof value     !== 'string' || value     === '') throw new Error('value must be a non-empty string');
+    if (this._predicates.includes(attribute)) {
+      throw new Error(
+        `'${attribute}' is already defined as a binary predicate. ` +
+        'Predicate and attribute names must be distinct.'
+      );
+    }
 
     if (!this.subjects.includes(subject)) {
       this.subjects.push(subject);

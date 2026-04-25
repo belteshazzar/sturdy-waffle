@@ -50,6 +50,7 @@ class Brain extends EventEmitter {
       maxMutations:          12,
       epochsPerRound:        500,
       maxEpochsTotal:        30000,
+      regressionTolerance:   0.05,
       verbose:               false,
       ...config,
     };
@@ -94,10 +95,11 @@ class Brain extends EventEmitter {
    */
   _spawnRegion(lesson) {
     const regionConfig = {
-      targetAccuracy: this.config.defaultTargetAccuracy,
-      maxMutations:   this.config.maxMutations,
-      epochsPerRound: this.config.epochsPerRound,
-      maxEpochsTotal: this.config.maxEpochsTotal,
+      targetAccuracy:      this.config.defaultTargetAccuracy,
+      maxMutations:        this.config.maxMutations,
+      epochsPerRound:      this.config.epochsPerRound,
+      maxEpochsTotal:      this.config.maxEpochsTotal,
+      regressionTolerance: this.config.regressionTolerance,
     };
 
     const region = new BrainRegion({ domain: lesson.domain, lesson, config: regionConfig });
@@ -203,14 +205,22 @@ class Brain extends EventEmitter {
    * region for each node.
    *
    * Expression nodes take one of two forms:
-   *   • Literal value:   { value: 0 | 1 }
+   *   • Literal value:   { value: <number> }
    *   • Operation:       { op: 'AND', inputs: [expr, expr] }
+   *                   or { op: 'ADD', domain: 'math.ADD', inputs: [expr, expr] }
    *
-   * The operation name is mapped to a domain as "boolean.<OP>" (uppercase).
-   * Any domain scheme can be used; the op/domain mapping is just a convention.
+   * Domain resolution (in priority order):
+   *   1. Use `expression.domain` when explicitly provided on the node.
+   *   2. Fall back to `"boolean.<OP>"` for backwards compatibility with existing
+   *      boolean expression trees that omit a domain.
+   *
+   * Output type:
+   *   • Regions trained in 'classification' mode return a thresholded 0/1 value.
+   *   • Regions trained in 'regression' mode return the raw continuous prediction,
+   *     allowing continuous intermediate values to propagate through the tree.
    *
    * @param {object} expression
-   * @returns {number}  0 or 1
+   * @returns {number}
    */
   evaluate(expression) {
     if (expression.value !== undefined) {
@@ -222,8 +232,18 @@ class Brain extends EventEmitter {
     }
 
     const evaluatedInputs = expression.inputs.map(e => this.evaluate(e));
-    const domain          = `boolean.${expression.op.toUpperCase()}`;
-    return this.predictBinary(evaluatedInputs, domain)[0];
+
+    // Support an explicit domain on the node; fall back to boolean.<OP> for
+    // backwards compatibility with existing boolean expression trees.
+    const domain = expression.domain || `boolean.${expression.op.toUpperCase()}`;
+    const region = this.router.route(domain);
+    if (!region) throw new Error(`No brain region found for domain '${domain}'`);
+
+    // Regression regions return continuous values; classification regions return 0/1.
+    if (region.lesson && region.lesson.mode === 'regression') {
+      return region.predict(evaluatedInputs)[0];
+    }
+    return region.predictBinary(evaluatedInputs)[0];
   }
 
   // ── Knowledge checks ──────────────────────────────────────────────────────

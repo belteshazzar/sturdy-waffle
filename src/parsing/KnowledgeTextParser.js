@@ -26,6 +26,13 @@
  *   ; confidence=0.8; source=manual
  */
 class KnowledgeTextParser {
+  /**
+   * @param {string} text
+   * @param {object} [opts]
+   * @param {'both'|'statements'|'queries'} [opts.mode='both']
+   * @param {string} [opts.defaultSource='text']
+   * @returns {{ statements: object[], queries: object[] }}
+   */
   static parse(text, { mode = 'both', defaultSource = 'text' } = {}) {
     const statements = [];
     const queries = [];
@@ -74,12 +81,15 @@ class KnowledgeTextParser {
 
   static parseStatementLine(line, { defaultSource = 'text' } = {}) {
     const { statement, meta } = KnowledgeTextParser._splitMeta(line, { defaultSource });
-    const match = statement.match(/^([A-Za-z]+)\s*:\s*(.+)$/);
-    if (!match) {
+    const colonIndex = statement.indexOf(':');
+    if (colonIndex <= 0) {
       throw new Error(`KnowledgeTextParser: invalid statement '${line}'`);
     }
-    const kind = match[1].toLowerCase();
-    const rest = match[2].trim();
+    const kind = statement.slice(0, colonIndex).trim().toLowerCase();
+    const rest = statement.slice(colonIndex + 1).trim();
+    if (!kind || !rest) {
+      throw new Error(`KnowledgeTextParser: invalid statement '${line}'`);
+    }
 
     if (kind === 'fact') {
       return KnowledgeTextParser._parseFact(rest, meta);

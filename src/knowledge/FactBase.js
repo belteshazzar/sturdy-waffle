@@ -579,7 +579,7 @@ class FactBase {
   static _normalizeMeta(meta) {
     if (!meta || typeof meta !== 'object') return null;
     const normalized = {};
-    if (meta.confidence !== undefined && meta.confidence !== null) {
+    if (meta.confidence != null) {
       const num = Number(meta.confidence);
       if (!Number.isNaN(num)) normalized.confidence = num;
     }

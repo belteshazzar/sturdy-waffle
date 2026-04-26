@@ -1009,7 +1009,7 @@ class Brain extends EventEmitter {
       });
     }
     if (this.worldModel) {
-      episodes.sort((a, b) => a.timestamp - b.timestamp);
+      episodes.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
       for (let i = 0; i < episodes.length - 1; i++) {
         this.worldModel.observe(episodes[i].input, episodes[i + 1].input);
       }

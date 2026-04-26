@@ -609,7 +609,9 @@ class FactBase {
     const normalized = {};
     if (meta.confidence != null) {
       const num = Number(meta.confidence);
-      if (!Number.isNaN(num)) normalized.confidence = num;
+      if (!Number.isNaN(num)) {
+        normalized.confidence = Math.max(0, Math.min(1, num));
+      }
     }
     if (meta.source) normalized.source = meta.source;
     return Object.keys(normalized).length > 0 ? normalized : null;

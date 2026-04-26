@@ -282,7 +282,12 @@ class KnowledgeTextParser {
       if (!value) return;
       if (key === 'confidence') {
         const num = Number(value);
-        if (!Number.isNaN(num)) meta.confidence = num;
+        if (!Number.isNaN(num)) {
+          if (num < 0 || num > 1) {
+            throw new Error(`KnowledgeTextParser: confidence must be between 0 and 1 (got ${num})`);
+          }
+          meta.confidence = num;
+        }
       } else if (key === 'source') {
         meta.source = KnowledgeTextParser._stripQuotes(value);
       } else if (key === 'type') {

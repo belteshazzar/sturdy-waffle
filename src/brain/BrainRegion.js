@@ -118,6 +118,12 @@ class BrainRegion extends EventEmitter {
       });
       if (initialWeights && this._sameArchitecture(initialWeights.architecture, baseNetwork.architecture)) {
         this.network = NeuralNetwork.fromJSON(initialWeights);
+      } else if (initialWeights) {
+        this.emit('meta:initSkipped', {
+          domain: this.domain,
+          expected: baseNetwork.architecture,
+          received: initialWeights.architecture,
+        });
       }
     }
 

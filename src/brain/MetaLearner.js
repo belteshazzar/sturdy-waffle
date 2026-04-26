@@ -47,15 +47,16 @@ class MetaLearner {
 
   _averageNetwork(base, next, count) {
     const averaged = JSON.parse(JSON.stringify(base));
+    const countMinusOne = count - 1;
     averaged.layers = averaged.layers.map((layer, idx) => {
       const nextLayer = next.layers[idx];
       return {
         ...layer,
         weights: layer.weights.map((row, i) =>
-          row.map((value, j) => (value * (count - 1) + nextLayer.weights[i][j]) / count)
+          row.map((value, j) => (value * countMinusOne + nextLayer.weights[i][j]) / count)
         ),
         biases: layer.biases.map((value, i) =>
-          (value * (count - 1) + nextLayer.biases[i]) / count
+          (value * countMinusOne + nextLayer.biases[i]) / count
         ),
       };
     });

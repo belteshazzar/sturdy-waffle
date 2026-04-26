@@ -45,9 +45,9 @@ function vecAdd(a, b) {
  * Euclidean distance between two vectors.
  */
 function euclideanDistance(a, b) {
-  const length = Math.max(a.length, b.length);
+  const maxLength = Math.max(a.length, b.length);
   let sum = 0;
-  for (let i = 0; i < length; i++) {
+  for (let i = 0; i < maxLength; i++) {
     const diff = (a[i] || 0) - (b[i] || 0);
     sum += diff * diff;
   }
@@ -61,8 +61,8 @@ function cosineSimilarity(a, b) {
   let dot = 0;
   let normA = 0;
   let normB = 0;
-  const length = Math.max(a.length, b.length);
-  for (let i = 0; i < length; i++) {
+  const maxLength = Math.max(a.length, b.length);
+  for (let i = 0; i < maxLength; i++) {
     const av = a[i] || 0;
     const bv = b[i] || 0;
     dot += av * bv;

@@ -18,7 +18,14 @@ class EpisodicMemory {
   }
 
   _signature(domain, input) {
-    return `${domain}:${input.map(v => v.toFixed(3)).join(',')}`;
+    const serialize = value => {
+      if (Array.isArray(value)) {
+        return `[${value.map(serialize).join('|')}]`;
+      }
+      const num = Number(value);
+      return Number.isNaN(num) ? String(value) : num.toFixed(3);
+    };
+    return `${domain}:${input.map(serialize).join(',')}`;
   }
 
   addEpisode({ domain, input, output, tags = [], metadata = {} }) {
@@ -46,9 +53,11 @@ class EpisodicMemory {
     const candidates = this.episodes.filter(ep => (domain ? ep.domain === domain : true));
     if (!input || candidates.length === 0) return candidates.slice(-limit);
 
+    const flatten = value => (Array.isArray(value) ? value.flat(Infinity) : [value]);
+    const queryInput = flatten(input);
     const scored = candidates.map(ep => ({
       episode: ep,
-      distance: euclideanDistance(ep.input, input),
+      distance: euclideanDistance(flatten(ep.input), queryInput),
     }));
     scored.sort((a, b) => a.distance - b.distance);
     return scored.slice(0, limit).map(s => s.episode);

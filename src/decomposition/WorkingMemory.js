@@ -1,6 +1,6 @@
 'use strict';
 
-const { TOKEN, ARITY, VOCAB_SIZE } = require('./tokens');
+const { TOKEN, ARITY, VOCAB_SIZE, VALUES } = require('./tokens');
 
 /**
  * WorkingMemory — short-term workspace for incremental problem decomposition.
@@ -31,6 +31,7 @@ class WorkingMemory {
   constructor(maxSlots = 16) {
     this.maxSlots = maxSlots;
     this.slots    = new Array(maxSlots).fill(TOKEN.NULL);
+    this.values   = new Array(maxSlots).fill(null);
     this.length   = 0;   // number of active (non-NULL) slots
   }
 
@@ -43,8 +44,28 @@ class WorkingMemory {
    */
   load(tokens) {
     this.slots  = new Array(this.maxSlots).fill(TOKEN.NULL);
+    this.values = new Array(this.maxSlots).fill(null);
     const n     = Math.min(tokens.length, this.maxSlots);
-    for (let i = 0; i < n; i++) this.slots[i] = tokens[i];
+    for (let i = 0; i < n; i++) {
+      const tok = tokens[i];
+      if (tok && typeof tok === 'object') {
+        const tokenId = tok.token !== undefined ? tok.token : TOKEN.VALUE;
+        this.slots[i] = tokenId;
+        if (tok.value !== undefined) {
+          this.values[i] = tok.value;
+        } else if (tokenId === TOKEN.V0) {
+          this.values[i] = 0;
+        } else if (tokenId === TOKEN.V1) {
+          this.values[i] = 1;
+        } else {
+          this.values[i] = null;
+        }
+      } else {
+        this.slots[i] = tok;
+        if (tok === TOKEN.V0) this.values[i] = 0;
+        if (tok === TOKEN.V1) this.values[i] = 1;
+      }
+    }
     this.length = n;
   }
 
@@ -64,10 +85,16 @@ class WorkingMemory {
    */
   reduce(start, arity, result) {
     const consumed = 1 + arity;           // op slot + operand slots
-    this.slots.splice(start, consumed, result);
+    const token = result === 0 ? TOKEN.V0 : result === 1 ? TOKEN.V1 : TOKEN.VALUE;
+    this.slots.splice(start, consumed, token);
+    this.values.splice(start, consumed, result);
     // Restore the buffer to exactly maxSlots by appending NULLs
-    for (let k = 0; k < arity; k++) this.slots.push(TOKEN.NULL);
+    for (let k = 0; k < arity; k++) {
+      this.slots.push(TOKEN.NULL);
+      this.values.push(null);
+    }
     this.slots = this.slots.slice(0, this.maxSlots);
+    this.values = this.values.slice(0, this.maxSlots);
     this.length -= arity;                  // net change: removed arity, added 0
   }
 
@@ -79,7 +106,7 @@ class WorkingMemory {
    */
   isSolved() {
     return this.length === 1 &&
-           (this.slots[0] === TOKEN.V0 || this.slots[0] === TOKEN.V1);
+           (VALUES.includes(this.slots[0]));
   }
 
   /**
@@ -87,7 +114,7 @@ class WorkingMemory {
    * @returns {number|null}
    */
   answer() {
-    return this.isSolved() ? this.slots[0] : null;
+    return this.isSolved() ? this.values[0] : null;
   }
 
   /**
@@ -115,9 +142,9 @@ class WorkingMemory {
       const args = [];
       let ok = true;
       for (let j = 1; j <= a; j++) {
-        const v = this.slots[i + j];
-        if (v !== TOKEN.V0 && v !== TOKEN.V1) { ok = false; break; }
-        args.push(v);
+        const vTok = this.slots[i + j];
+        if (!VALUES.includes(vTok)) { ok = false; break; }
+        args.push(this.values[i + j]);
       }
       if (ok) reductions.push({ start: i, op: tok, args });
     }
@@ -149,26 +176,36 @@ class WorkingMemory {
    * @returns {number[]}
    */
   toVector(embeddingTable) {
+    const valueDim = 1;
     if (!embeddingTable) {
-      // ── Original one-hot encoding ──────────────────────────────────────────
-      const vec = new Array(this.maxSlots * VOCAB_SIZE).fill(0);
+      // ── One-hot + value channel ───────────────────────────────────────────
+      const slotSize = VOCAB_SIZE + valueDim;
+      const vec = new Array(this.maxSlots * slotSize).fill(0);
       for (let i = 0; i < this.maxSlots; i++) {
         const tok = this.slots[i];
         if (tok >= 0 && tok < VOCAB_SIZE) {
-          vec[i * VOCAB_SIZE + tok] = 1;
+          vec[i * slotSize + tok] = 1;
         }
-        // NULL (tok === -1) → all-zeros segment (already 0)
+        const val = this.values[i];
+        if (val !== null && val !== undefined && VALUES.includes(tok)) {
+          vec[i * slotSize + VOCAB_SIZE] = val;
+        }
       }
       return vec;
     }
 
-    // ── Dense embedding encoding ───────────────────────────────────────────
+    // ── Dense embedding + value channel ───────────────────────────────────
     const dim = embeddingTable.dim;
-    const vec = new Array(this.maxSlots * dim).fill(0);
+    const slotSize = dim + valueDim;
+    const vec = new Array(this.maxSlots * slotSize).fill(0);
     for (let i = 0; i < this.maxSlots; i++) {
       const emb = embeddingTable.lookup(this.slots[i]);
       for (let k = 0; k < dim; k++) {
-        vec[i * dim + k] = emb[k];
+        vec[i * slotSize + k] = emb[k];
+      }
+      const val = this.values[i];
+      if (val !== null && val !== undefined && VALUES.includes(this.slots[i])) {
+        vec[i * slotSize + dim] = val;
       }
     }
     return vec;
@@ -180,6 +217,7 @@ class WorkingMemory {
   clone() {
     const m   = new WorkingMemory(this.maxSlots);
     m.slots   = [...this.slots];
+    m.values  = [...this.values];
     m.length  = this.length;
     return m;
   }
@@ -187,10 +225,11 @@ class WorkingMemory {
   /** Human-readable slot listing (active slots only). */
   toString() {
     const { TOKEN_NAMES } = require('./tokens');
-    const names = this.slots.slice(0, this.length).map(t => {
+    const names = this.slots.slice(0, this.length).map((t, idx) => {
       if (t === TOKEN.NULL) return 'NULL';
       if (t === TOKEN.V0)   return '0';
       if (t === TOKEN.V1)   return '1';
+      if (t === TOKEN.VALUE) return `${this.values[idx] ?? 'value'}`;
       return TOKEN_NAMES[t] || String(t);
     });
     return `[${names.join(', ')}]`;

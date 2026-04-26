@@ -15,6 +15,8 @@
 const Brain        = require('./src/brain/Brain');
 const BrainRegion  = require('./src/brain/BrainRegion');
 const NeuralNetwork = require('./src/brain/NeuralNetwork');
+const RecurrentNetwork = require('./src/brain/RecurrentNetwork');
+const SequenceBrainRegion = require('./src/brain/SequenceBrainRegion');
 const SharedEmbeddingBank = require('./src/brain/SharedEmbeddingBank');
 const MetaLearner = require('./src/brain/MetaLearner');
 const Router       = require('./src/routing/Router');
@@ -26,6 +28,8 @@ const FactBase     = require('./src/knowledge/FactBase');
 const MemorySystem = require('./src/memory/MemorySystem');
 const WorldModel   = require('./src/world/WorldModel');
 const EvaluationSuite = require('./src/evaluation/EvaluationSuite');
+const ExpressionParser = require('./src/parsing/ExpressionParser');
+const { COMPLEX_SKILLS } = require('./src/skills/ComplexSkills');
 
 // Decomposition subsystem
 const {
@@ -41,6 +45,8 @@ module.exports = {
   Brain,
   BrainRegion,
   NeuralNetwork,
+  RecurrentNetwork,
+  SequenceBrainRegion,
   SharedEmbeddingBank,
   MetaLearner,
   Router,
@@ -52,6 +58,8 @@ module.exports = {
   MemorySystem,
   WorldModel,
   EvaluationSuite,
+  ExpressionParser,
+  COMPLEX_SKILLS,
   // Decomposition
   WorkingMemory,
   DecompositionGraph,

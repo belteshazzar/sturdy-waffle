@@ -12,13 +12,19 @@ const { TOKEN, ARITY } = require('../../src/decomposition/tokens');
  */
 function evalOp(opTok, args) {
   switch (opTok) {
-    case TOKEN.AND:  return args[0] & args[1];
-    case TOKEN.OR:   return args[0] | args[1];
-    case TOKEN.NOT:  return args[0] === 0 ? 1 : 0;
-    case TOKEN.XOR:  return args[0] ^ args[1];
-    case TOKEN.NAND: return (args[0] & args[1]) === 0 ? 1 : 0;
-    case TOKEN.NOR:  return (args[0] | args[1]) === 0 ? 1 : 0;
-    case TOKEN.XNOR: return (args[0] ^ args[1]) === 0 ? 1 : 0;
+    case TOKEN.AND:  return Math.min(args[0], args[1]);
+    case TOKEN.OR:   return Math.max(args[0], args[1]);
+    case TOKEN.NOT:  return 1 - args[0];
+    case TOKEN.XOR:  return Math.abs(args[0] - args[1]);
+    case TOKEN.NAND: return 1 - Math.min(args[0], args[1]);
+    case TOKEN.NOR:  return 1 - Math.max(args[0], args[1]);
+    case TOKEN.XNOR: return 1 - Math.abs(args[0] - args[1]);
+    case TOKEN.IMP:  return Math.max(1 - args[0], args[1]);
+    case TOKEN.ADD:  return args[0] + args[1];
+    case TOKEN.SUB:  return args[0] - args[1];
+    case TOKEN.MUL:  return args[0] * args[1];
+    case TOKEN.DIV:  return args[1] === 0 ? 0 : args[0] / args[1];
+    case TOKEN.SQRT: return Math.sqrt(Math.max(0, args[0]));
     default: throw new Error(`evalOp: unknown op token ${opTok}`);
   }
 }
@@ -38,10 +44,10 @@ function evalOp(opTok, args) {
  * @param {number[]} opToks  Operator token integers to sample from
  * @returns {{ type: 'value'|'op', value?: number, opTok?: number, children?: Array }}
  */
-function randomTree(depth, opToks) {
-  if (depth === 0) {
-    // Use TOKEN.V0 / TOKEN.V1 explicitly so leaf values are always token integers
-    return { type: 'value', value: Math.random() < 0.5 ? TOKEN.V0 : TOKEN.V1 };
+function randomTree(depth, opToks, valuePool) {
+    if (depth === 0) {
+    const value = valuePool[Math.floor(Math.random() * valuePool.length)];
+    return { type: 'value', value };
   }
   const opTok = opToks[Math.floor(Math.random() * opToks.length)];
   const arity = ARITY[opTok];
@@ -50,7 +56,7 @@ function randomTree(depth, opToks) {
     const childDepth = (i === 0)
       ? depth - 1
       : Math.floor(Math.random() * depth);
-    children.push(randomTree(childDepth, opToks));
+    children.push(randomTree(childDepth, opToks, valuePool));
   }
   return { type: 'op', opTok, children };
 }
@@ -61,8 +67,12 @@ function randomTree(depth, opToks) {
  * @returns {number[]}
  */
 function treeToTokens(tree) {
-  if (tree.type === 'value') return [tree.value];
-  return [tree.opTok, ...tree.children.flatMap(c => treeToTokens(c))];
+  if (tree.type === 'value') {
+    if (tree.value === 0) return [TOKEN.V0];
+    if (tree.value === 1) return [TOKEN.V1];
+    return [{ token: TOKEN.VALUE, value: tree.value }];
+  }
+  return [{ token: tree.opTok }, ...tree.children.flatMap(c => treeToTokens(c))];
 }
 
 /**
@@ -76,7 +86,7 @@ function treeToTokens(tree) {
  */
 function treeToString(tree) {
   const { TOKEN_NAMES } = require('../../src/decomposition/tokens');
-  if (tree.type === 'value') return tree.value === 0 ? '0' : '1';
+  if (tree.type === 'value') return String(tree.value);
   const name = TOKEN_NAMES[tree.opTok] || String(tree.opTok);
   const args = tree.children.map(c => treeToString(c)).join(',');
   return `${name}(${args})`;
@@ -122,8 +132,9 @@ class DecompositionCurriculum {
    * @param {number[]} [opts.depth1Ops]  Op tokens for stage 1 (default: all 7)
    * @param {number[]} [opts.depth2Ops]  Op tokens for stage 2 (default: AND/OR/NOT/XOR)
    * @param {number[]} [opts.depth3Ops]  Op tokens for stage 3 (default: AND/OR/NOT/XOR)
-   * @param {number}   [opts.depth2Count=80]  Sampled problems for stage 2
-   * @param {number}   [opts.depth3Count=60]  Sampled problems for stage 3
+    * @param {number}   [opts.depth2Count=80]  Sampled problems for stage 2
+    * @param {number}   [opts.depth3Count=60]  Sampled problems for stage 3
+    * @param {number[]} [opts.valuePool=[0,1]] Numeric values to use for leaves
    */
   constructor(opts = {}) {
     const ALL_OPS = [TOKEN.AND, TOKEN.OR, TOKEN.NOT, TOKEN.XOR, TOKEN.NAND, TOKEN.NOR, TOKEN.XNOR];
@@ -133,6 +144,7 @@ class DecompositionCurriculum {
     this.depth3Ops   = opts.depth3Ops   || [TOKEN.AND, TOKEN.OR, TOKEN.NOT, TOKEN.XOR];
     this.depth2Count = opts.depth2Count !== undefined ? opts.depth2Count : 80;
     this.depth3Count = opts.depth3Count !== undefined ? opts.depth3Count : 60;
+    this.valuePool   = opts.valuePool || [0, 1];
   }
 
   // ── Stage generators ──────────────────────────────────────────────────────
@@ -152,18 +164,23 @@ class DecompositionCurriculum {
       const arity   = ARITY[opTok];
       const opName  = TOKEN_NAMES[opTok];
       if (arity === 1) {
-        for (const v of [0, 1]) {
+        for (const v of this.valuePool) {
+          const tree = { type: 'op', opTok, children: [{ type: 'value', value: v }] };
           problems.push({
-            tokens: [opTok, v],
+            tokens: treeToTokens(tree),
             answer: evalOp(opTok, [v]),
             string: `${opName}(${v})`,
           });
         }
       } else {
-        for (const a of [0, 1]) {
-          for (const b of [0, 1]) {
+        for (const a of this.valuePool) {
+          for (const b of this.valuePool) {
+            const tree = { type: 'op', opTok, children: [
+              { type: 'value', value: a },
+              { type: 'value', value: b },
+            ] };
             problems.push({
-              tokens: [opTok, a, b],
+              tokens: treeToTokens(tree),
               answer: evalOp(opTok, [a, b]),
               string: `${opName}(${a},${b})`,
             });
@@ -198,7 +215,7 @@ class DecompositionCurriculum {
 
     while (problems.length < count && attempts < maxAttempts) {
       attempts++;
-      const tree   = randomTree(depth, opToks);
+      const tree   = randomTree(depth, opToks, this.valuePool);
       const tokens = treeToTokens(tree);
       const key    = JSON.stringify(tokens);
       if (!seen.has(key)) {
@@ -228,10 +245,19 @@ class DecompositionCurriculum {
 // ── Singleton ─────────────────────────────────────────────────────────────────
 
 const decompositionCurriculum = new DecompositionCurriculum();
+const mixedDomainCurriculum = new DecompositionCurriculum({
+  depth1Ops: [TOKEN.AND, TOKEN.OR, TOKEN.NOT, TOKEN.XOR, TOKEN.IMP, TOKEN.ADD, TOKEN.SUB, TOKEN.MUL, TOKEN.DIV],
+  depth2Ops: [TOKEN.AND, TOKEN.OR, TOKEN.NOT, TOKEN.XOR, TOKEN.IMP, TOKEN.ADD, TOKEN.MUL],
+  depth3Ops: [TOKEN.AND, TOKEN.OR, TOKEN.NOT, TOKEN.XOR, TOKEN.IMP, TOKEN.ADD, TOKEN.MUL],
+  depth2Count: 120,
+  depth3Count: 80,
+  valuePool: [0, 0.25, 0.5, 0.75, 1],
+});
 
 module.exports = {
   DecompositionCurriculum,
   decompositionCurriculum,
+  mixedDomainCurriculum,
   /** Exported so callers can pass it directly to computeExpertTrace(). */
   evalOp,
   /** Exported for testing and Phase 4 training data generation. */

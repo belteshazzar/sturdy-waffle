@@ -49,13 +49,13 @@ class StringEncoder {
    * @param {object} opts
    * @param {number} [opts.maxWordLen=4]      Chars per word after pad/truncate
    * @param {number} [opts.hiddenSize=32]     Hidden neurons in the word encoder
-   * @param {number} [opts.vocabSize=9]       Output classes (TOKEN vocabulary)
+    * @param {number} [opts.vocabSize=16]       Output classes (TOKEN vocabulary)
    * @param {number} [opts.learningRate=0.05]
    */
   constructor({
     maxWordLen  = 4,
     hiddenSize  = 32,
-    vocabSize   = 9,
+    vocabSize   = 16,
     learningRate = 0.05,
   } = {}) {
     this.maxWordLen   = maxWordLen;
@@ -95,15 +95,18 @@ class StringEncoder {
    */
   static toTokenIds(exprString) {
     const { TOKEN } = require('./tokens');
-    const NAME_MAP  = {
-      AND: TOKEN.AND, OR: TOKEN.OR, NOT: TOKEN.NOT, XOR: TOKEN.XOR,
-      NAND: TOKEN.NAND, NOR: TOKEN.NOR, XNOR: TOKEN.XNOR,
-      '0': TOKEN.V0, '1': TOKEN.V1,
-    };
-    return StringEncoder.splitWords(exprString).map(w => {
-      const id = NAME_MAP[w.toUpperCase()];
-      if (id === undefined) throw new Error(`StringEncoder: unknown token '${w}'`);
-      return id;
+    return StringEncoder.splitWords(exprString).map(word => {
+      const upper = word.toUpperCase();
+      if (Object.prototype.hasOwnProperty.call(TOKEN, upper)) {
+        return TOKEN[upper];
+      }
+      const num = Number(word);
+      if (!Number.isNaN(num)) {
+        if (num === 0) return TOKEN.V0;
+        if (num === 1) return TOKEN.V1;
+        return { token: TOKEN.VALUE, value: num };
+      }
+      throw new Error(`StringEncoder: unknown token '${word}'`);
     });
   }
 
@@ -155,7 +158,16 @@ class StringEncoder {
    * @returns {number[]}
    */
   encode(exprString) {
-    return StringEncoder.splitWords(exprString).map(w => this.predictTokenId(w));
+    const { TOKEN } = require('./tokens');
+    return StringEncoder.splitWords(exprString).map(word => {
+      const num = Number(word);
+      if (!Number.isNaN(num)) {
+        if (num === 0) return TOKEN.V0;
+        if (num === 1) return TOKEN.V1;
+        return { token: TOKEN.VALUE, value: num };
+      }
+      return this.predictTokenId(word);
+    });
   }
 
   // ── Training ──────────────────────────────────────────────────────────────
@@ -169,8 +181,9 @@ class StringEncoder {
   train(examples, epochs = 40) {
     if (examples.length === 0) return;
     const samples = examples.map(({ word, tokenId }) => {
+      const id = tokenId && typeof tokenId === 'object' ? tokenId.token : tokenId;
       const target = new Array(this.vocabSize).fill(0);
-      if (tokenId >= 0 && tokenId < this.vocabSize) target[tokenId] = 1;
+      if (id >= 0 && id < this.vocabSize) target[id] = 1;
       return { input: this.wordToFeature(word), output: target };
     });
     this.network.train(samples, epochs);

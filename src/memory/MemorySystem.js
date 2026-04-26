@@ -7,6 +7,7 @@ class MemorySystem {
   constructor({ episodicCapacity = 2000, semanticCapacity = 2000 } = {}) {
     this.episodic = new EpisodicMemory({ capacity: episodicCapacity });
     this.semantic = new SemanticMemory({ capacity: semanticCapacity });
+    this.lastConsolidation = null;
   }
 
   recordLesson(lesson) {
@@ -52,12 +53,27 @@ class MemorySystem {
         }
       }
     }
+    const relationFacts = factBase.getRelationFacts ? factBase.getRelationFacts() : [];
+    relationFacts.forEach(({ relation, args, value }) => {
+      this.semantic.addRelationFact({
+        relation,
+        args,
+        value,
+        confidence: 1,
+        source: 'factBaseRelation',
+      });
+    });
   }
 
   consolidateEpisodes({ minSupport = 2 } = {}) {
     const grouped = new Map();
     for (const ep of this.episodic.episodes) {
-      const signature = ep.signature || `${ep.domain}:${ep.input.map(v => v.toFixed(3)).join(',')}`;
+      const serialize = value => {
+        if (Array.isArray(value)) return `[${value.map(serialize).join('|')}]`;
+        const num = Number(value);
+        return Number.isNaN(num) ? String(value) : num.toFixed(3);
+      };
+      const signature = ep.signature || `${ep.domain}:${ep.input.map(serialize).join(',')}`;
       if (!grouped.has(signature)) {
         grouped.set(signature, { domain: ep.domain, input: ep.input, outputs: [], support: 0 });
       }
@@ -91,6 +107,11 @@ class MemorySystem {
   consolidate({ factBase, minSupport = 2, minConfidence = 0.8 } = {}) {
     const concepts = this.consolidateEpisodes({ minSupport });
     const rules = this.semantic.induceRulesFromFactBase(factBase, { minSupport, minConfidence });
+    this.lastConsolidation = {
+      concepts: concepts.length,
+      rules: rules.length,
+      timestamp: Date.now(),
+    };
     return { concepts, rules };
   }
 
@@ -98,6 +119,7 @@ class MemorySystem {
     return {
       episodic: this.episodic.getInfo(),
       semantic: this.semantic.getInfo(),
+      consolidation: this.lastConsolidation,
     };
   }
 
@@ -105,6 +127,7 @@ class MemorySystem {
     return {
       episodic: this.episodic.toJSON(),
       semantic: this.semantic.toJSON(),
+      lastConsolidation: this.lastConsolidation,
     };
   }
 
@@ -112,6 +135,7 @@ class MemorySystem {
     const mem = new MemorySystem();
     if (data && data.episodic) mem.episodic = EpisodicMemory.fromJSON(data.episodic);
     if (data && data.semantic) mem.semantic = SemanticMemory.fromJSON(data.semantic);
+    mem.lastConsolidation = data.lastConsolidation || null;
     return mem;
   }
 }

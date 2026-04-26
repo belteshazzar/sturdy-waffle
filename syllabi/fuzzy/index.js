@@ -195,6 +195,7 @@ const fuzzySyllabus = new Syllabus({
 
 module.exports = {
   fuzzySyllabus,
+  fuzzyChainSyllabus: require('./chains').fuzzyChainSyllabus,
   lessons: {
     NOT: notLesson,
     AND: andLesson,

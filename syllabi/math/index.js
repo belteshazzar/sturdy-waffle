@@ -208,6 +208,7 @@ const mathSyllabus = new Syllabus({
 
 module.exports = {
   mathSyllabus,
+  identitySyllabus: require('./identities').identitySyllabus,
   lessons: {
     ADD:  addLesson,
     SUB:  subLesson,

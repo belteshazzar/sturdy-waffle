@@ -68,12 +68,28 @@ class EvaluationSuite {
     };
   }
 
+  evaluateRelations({ factBase } = {}) {
+    if (!factBase) return { evaluated: 0, accuracy: null };
+    const relationFacts = factBase.getRelationFacts();
+    if (relationFacts.length === 0) return { evaluated: 0, accuracy: null };
+    let correct = 0;
+    relationFacts.forEach(rel => {
+      const actual = this.brain.evaluate({ relation: { name: rel.relation, args: rel.args } });
+      if (actual === rel.value) correct++;
+    });
+    return {
+      evaluated: relationFacts.length,
+      accuracy: correct / relationFacts.length,
+    };
+  }
+
   runAll({ syllabi, expressions, transferPairs, factBase, shots } = {}) {
     return {
       baseline:      this.baseline({ syllabi, shots }),
       compositional: this.evaluateCompositional({ expressions }),
       transfer:      this.evaluateTransfer({ pairs: transferPairs || [], shots }),
       selfDiscovery: this.evaluateSelfDiscovery({ factBase }),
+      relations:     this.evaluateRelations({ factBase }),
     };
   }
 

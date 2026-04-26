@@ -41,10 +41,44 @@ function vecAdd(a, b) {
   return a.map((v, i) => v + b[i]);
 }
 
+/**
+ * Euclidean distance between two vectors.
+ */
+function euclideanDistance(a, b) {
+  const maxLength = Math.max(a.length, b.length);
+  let sum = 0;
+  for (let i = 0; i < maxLength; i++) {
+    const diff = (a[i] || 0) - (b[i] || 0);
+    sum += diff * diff;
+  }
+  return Math.sqrt(sum);
+}
+
+/**
+ * Cosine similarity between two vectors.
+ */
+function cosineSimilarity(a, b) {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  const maxLength = Math.max(a.length, b.length);
+  for (let i = 0; i < maxLength; i++) {
+    const av = a[i] || 0;
+    const bv = b[i] || 0;
+    dot += av * bv;
+    normA += av * av;
+    normB += bv * bv;
+  }
+  if (normA === 0 || normB === 0) return 0;
+  return dot / Math.sqrt(normA * normB);
+}
+
 module.exports = {
   xavierInit,
   createMatrix,
   createVector,
   matVecMul,
   vecAdd,
+  euclideanDistance,
+  cosineSimilarity,
 };

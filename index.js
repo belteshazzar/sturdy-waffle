@@ -15,11 +15,17 @@
 const Brain        = require('./src/brain/Brain');
 const BrainRegion  = require('./src/brain/BrainRegion');
 const NeuralNetwork = require('./src/brain/NeuralNetwork');
+const SharedEmbeddingBank = require('./src/brain/SharedEmbeddingBank');
+const MetaLearner = require('./src/brain/MetaLearner');
 const Router       = require('./src/routing/Router');
 const StateManager = require('./src/persistence/StateManager');
 const Lesson       = require('./src/learning/Lesson');
 const Syllabus     = require('./src/learning/Syllabus');
+const SelfSupervisedLearner = require('./src/learning/SelfSupervisedLearner');
 const FactBase     = require('./src/knowledge/FactBase');
+const MemorySystem = require('./src/memory/MemorySystem');
+const WorldModel   = require('./src/world/WorldModel');
+const EvaluationSuite = require('./src/evaluation/EvaluationSuite');
 
 // Decomposition subsystem
 const {
@@ -35,11 +41,17 @@ module.exports = {
   Brain,
   BrainRegion,
   NeuralNetwork,
+  SharedEmbeddingBank,
+  MetaLearner,
   Router,
   StateManager,
   Lesson,
   Syllabus,
+  SelfSupervisedLearner,
   FactBase,
+  MemorySystem,
+  WorldModel,
+  EvaluationSuite,
   // Decomposition
   WorkingMemory,
   DecompositionGraph,

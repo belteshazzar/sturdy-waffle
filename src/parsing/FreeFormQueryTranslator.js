@@ -3,56 +3,94 @@
 const { normalizeEntity } = require('../ingestion/EntityNormalization');
 
 function cleanQuestion(text) {
-  return text.replace(/[?]+$/, '').trim();
+  let cleaned = text.trim();
+  while (cleaned.endsWith('?')) {
+    cleaned = cleaned.slice(0, -1);
+  }
+  return cleaned.trim();
 }
 
 function translateLine(line, opts = {}) {
   const cleaned = cleanQuestion(line);
   if (!cleaned) return null;
 
-  let match = cleaned.match(/^(who|what)\s+is\s+(.+)$/i);
-  if (match) {
-    const subject = normalizeEntity(match[2]);
+  const lower = cleaned.toLowerCase();
+
+  if (lower.startsWith('who is ')) {
+    const subjectText = cleaned.slice('who is '.length).trim();
+    const subject = normalizeEntity(subjectText);
     if (subject) {
       return { kind: 'attribute', subject, attribute: opts.identityAttribute || 'description' };
     }
   }
 
-  match = cleaned.match(/^what\s+type\s+of\s+(.+)$/i);
-  if (match) {
-    const subject = normalizeEntity(match[1]);
+  if (lower.startsWith('what is ')) {
+    const subjectText = cleaned.slice('what is '.length).trim();
+    const subject = normalizeEntity(subjectText);
+    if (subject) {
+      return { kind: 'attribute', subject, attribute: opts.identityAttribute || 'description' };
+    }
+  }
+
+  if (lower.startsWith('what type of ')) {
+    const subjectText = cleaned.slice('what type of '.length).trim();
+    const subject = normalizeEntity(subjectText);
     if (subject) {
       return { kind: 'attribute', subject, attribute: 'type' };
     }
   }
 
-  match = cleaned.match(/^(when\s+was|when\s+is)\s+(.+)\s+born$/i);
-  if (match) {
-    const subject = normalizeEntity(match[2]);
+  if (lower.startsWith('when was ') && lower.endsWith(' born')) {
+    const subjectText = cleaned.slice('when was '.length, cleaned.length - ' born'.length).trim();
+    const subject = normalizeEntity(subjectText);
     if (subject) {
       return { kind: 'attribute', subject, attribute: 'birthDate' };
     }
   }
 
-  match = cleaned.match(/^(where\s+was|where\s+is)\s+(.+)\s+born$/i);
-  if (match) {
-    const subject = normalizeEntity(match[2]);
+  if (lower.startsWith('when is ') && lower.endsWith(' born')) {
+    const subjectText = cleaned.slice('when is '.length, cleaned.length - ' born'.length).trim();
+    const subject = normalizeEntity(subjectText);
+    if (subject) {
+      return { kind: 'attribute', subject, attribute: 'birthDate' };
+    }
+  }
+
+  if (lower.startsWith('where was ') && lower.endsWith(' born')) {
+    const subjectText = cleaned.slice('where was '.length, cleaned.length - ' born'.length).trim();
+    const subject = normalizeEntity(subjectText);
     if (subject) {
       return { kind: 'attribute', subject, attribute: 'birthPlace' };
     }
   }
 
-  match = cleaned.match(/^(where\s+is|where\s+was)\s+(.+)\s+located$/i);
-  if (match) {
-    const subject = normalizeEntity(match[2]);
+  if (lower.startsWith('where is ') && lower.endsWith(' born')) {
+    const subjectText = cleaned.slice('where is '.length, cleaned.length - ' born'.length).trim();
+    const subject = normalizeEntity(subjectText);
+    if (subject) {
+      return { kind: 'attribute', subject, attribute: 'birthPlace' };
+    }
+  }
+
+  if (lower.startsWith('where is ') && lower.endsWith(' located')) {
+    const subjectText = cleaned.slice('where is '.length, cleaned.length - ' located'.length).trim();
+    const subject = normalizeEntity(subjectText);
     if (subject) {
       return { kind: 'attribute', subject, attribute: 'location' };
     }
   }
 
-  match = cleaned.match(/^where\s+is\s+(.+)$/i);
-  if (match) {
-    const subject = normalizeEntity(match[1]);
+  if (lower.startsWith('where was ') && lower.endsWith(' located')) {
+    const subjectText = cleaned.slice('where was '.length, cleaned.length - ' located'.length).trim();
+    const subject = normalizeEntity(subjectText);
+    if (subject) {
+      return { kind: 'attribute', subject, attribute: 'location' };
+    }
+  }
+
+  if (lower.startsWith('where is ')) {
+    const subjectText = cleaned.slice('where is '.length).trim();
+    const subject = normalizeEntity(subjectText);
     if (subject) {
       return { kind: 'attribute', subject, attribute: 'location' };
     }

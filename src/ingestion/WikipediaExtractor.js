@@ -3,32 +3,80 @@
 const { normalizeEntity, normalizeAttribute, normalizeRelation } = require('./EntityNormalization');
 const { segmentWikipediaText, stripWikitext } = require('./WikipediaText');
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function stripParentheticals(value) {
+  if (!value) return '';
+  let result = '';
+  let depth = 0;
+  for (const ch of value) {
+    if (ch === '(') {
+      depth += 1;
+      continue;
+    }
+    if (ch === ')' && depth > 0) {
+      depth -= 1;
+      continue;
+    }
+    if (depth === 0) result += ch;
+  }
+  return result;
+}
+
+function collapseWhitespace(value) {
+  if (!value) return '';
+  let result = '';
+  let lastWasSpace = false;
+  for (const ch of value) {
+    const isWhitespace = ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
+    if (isWhitespace) {
+      if (!lastWasSpace && result.length) {
+        result += ' ';
+        lastWasSpace = true;
+      }
+      continue;
+    }
+    result += ch;
+    lastWasSpace = false;
+  }
+  return result;
+}
+
+function trimPunctuation(value) {
+  let cleaned = value.trim();
+  while (cleaned && [',', '–', '-', ':', ';', '.'].includes(cleaned[0])) {
+    cleaned = cleaned.slice(1).trim();
+  }
+  while (cleaned && [',', '–', '-', ':', ';', '.'].includes(cleaned[cleaned.length - 1])) {
+    cleaned = cleaned.slice(0, -1).trim();
+  }
+  return cleaned;
 }
 
 function cleanPhrase(value) {
   if (!value) return '';
-  let cleaned = value.trim();
-  cleaned = cleaned.replace(/\s*\([^)]*\)\s*/g, ' ');
-  cleaned = cleaned.replace(/\s+/g, ' ');
-  cleaned = cleaned.replace(/^[,–-]\s*/, '');
-  cleaned = cleaned.replace(/\s*[,.;:]\s*$/, '');
+  let cleaned = stripParentheticals(value);
+  cleaned = collapseWhitespace(cleaned);
+  cleaned = trimPunctuation(cleaned);
   return cleaned.trim();
 }
 
 function extractInfoboxAttributes(wikitext, subject, meta) {
   if (!wikitext) return [];
   const statements = [];
-  const infoboxMatch = wikitext.match(/\{\{Infobox[\s\S]*?\n\}\}/i);
-  if (!infoboxMatch) return statements;
-  const infobox = infoboxMatch[0];
+  const lower = wikitext.toLowerCase();
+  const start = lower.indexOf('{{infobox');
+  if (start < 0) return statements;
+  let end = lower.indexOf('\n}}', start);
+  if (end < 0) end = lower.indexOf('}}', start);
+  if (end < 0) return statements;
+  const infobox = wikitext.slice(start, end + 2);
   const lines = infobox.split(/\r?\n/);
   lines.forEach(line => {
-    const match = line.match(/^\|\s*([^=]+?)\s*=\s*(.+)\s*$/);
-    if (!match) return;
-    const rawKey = match[1];
-    const rawValue = match[2];
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('|')) return;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx < 0) return;
+    const rawKey = trimmed.slice(1, eqIdx).trim();
+    const rawValue = trimmed.slice(eqIdx + 1).trim();
     const attribute = normalizeAttribute(rawKey);
     if (!attribute) return;
     const value = cleanPhrase(stripWikitext(rawValue));
@@ -55,8 +103,13 @@ function extractFromSentence(sentence, subjectAliases, subject, meta) {
   if (!alias) return statements;
 
   let remainder = normalizedSentence.slice(alias.length).trim();
-  remainder = remainder.replace(/^\([^)]*\)\s*/, '');
-  remainder = remainder.replace(/^[,–-]\s*/, '');
+  if (remainder.startsWith('(')) {
+    const closeIdx = remainder.indexOf(')');
+    if (closeIdx >= 0) {
+      remainder = remainder.slice(closeIdx + 1).trim();
+    }
+  }
+  remainder = trimPunctuation(remainder);
 
   const typeMatch = remainder.match(/^(is|was)\s+(an?|the)\s+([^.;]+)/i);
   if (typeMatch) {

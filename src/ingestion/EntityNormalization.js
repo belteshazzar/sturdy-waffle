@@ -23,23 +23,64 @@ const ATTRIBUTE_ALIASES = new Map([
 function normalizeEntity(raw) {
   if (!raw || typeof raw !== 'string') return '';
   let cleaned = raw.trim();
-  cleaned = cleaned.replace(/\s*\([^)]*\)\s*$/, '');
-  cleaned = cleaned.replace(/['"]/g, '');
-  cleaned = cleaned.replace(/&/g, 'and');
-  cleaned = cleaned.replace(/\s+/g, '_');
-  cleaned = cleaned.replace(/[^A-Za-z0-9_.-]/g, '');
-  cleaned = cleaned.replace(/_+/g, '_');
-  return cleaned;
+  if (cleaned.endsWith(')')) {
+    const openIdx = cleaned.lastIndexOf('(');
+    if (openIdx >= 0) {
+      cleaned = cleaned.slice(0, openIdx).trim();
+    }
+  }
+  cleaned = cleaned.split('"').join('').split('\'').join('');
+  cleaned = cleaned.split('&').join('and');
+  let result = '';
+  let lastWasUnderscore = false;
+  for (const ch of cleaned) {
+    const code = ch.charCodeAt(0);
+    const isWhitespace = ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
+    const isAllowed =
+      (code >= 48 && code <= 57) ||
+      (code >= 65 && code <= 90) ||
+      (code >= 97 && code <= 122) ||
+      ch === '_' ||
+      ch === '.' ||
+      ch === '-';
+    if (isWhitespace) {
+      if (!lastWasUnderscore && result.length) {
+        result += '_';
+        lastWasUnderscore = true;
+      }
+      continue;
+    }
+    if (isAllowed) {
+      result += ch;
+      lastWasUnderscore = ch === '_';
+      continue;
+    }
+    lastWasUnderscore = false;
+  }
+  return result;
 }
 
 function normalizeKey(raw) {
   if (!raw || typeof raw !== 'string') return '';
   let cleaned = raw.trim().toLowerCase();
-  cleaned = cleaned.replace(/['"]/g, '');
-  cleaned = cleaned.replace(/&/g, 'and');
-  cleaned = cleaned.replace(/[^a-z0-9]+/g, ' ');
-  cleaned = cleaned.trim().replace(/\s+/g, ' ');
-  return cleaned;
+  cleaned = cleaned.split('"').join('').split('\'').join('');
+  cleaned = cleaned.split('&').join('and');
+  let result = '';
+  let lastWasSpace = false;
+  for (const ch of cleaned) {
+    const code = ch.charCodeAt(0);
+    const isAlnum = (code >= 48 && code <= 57) || (code >= 97 && code <= 122);
+    if (isAlnum) {
+      result += ch;
+      lastWasSpace = false;
+      continue;
+    }
+    if (!lastWasSpace && result.length) {
+      result += ' ';
+      lastWasSpace = true;
+    }
+  }
+  return result.trim();
 }
 
 function toCamelCase(text) {

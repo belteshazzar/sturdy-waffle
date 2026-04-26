@@ -41,6 +41,102 @@ class EvaluationSuite {
     };
   }
 
+  evaluateGeneralization({ lessons = [] } = {}) {
+    const reports = this._currentPerformance(lessons);
+    const accuracies = reports.map(r => r.accuracy).filter(v => typeof v === 'number');
+    const gaps = reports.map(r => r.generalizationGap).filter(v => typeof v === 'number');
+    const mean = arr => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+    return {
+      averageAccuracy: mean(accuracies),
+      averageGap: mean(gaps),
+      results: reports,
+    };
+  }
+
+  evaluateLongHorizon({ expressions = [] } = {}) {
+    if (!expressions.length) {
+      return { evaluated: 0, accuracy: null, solvedRate: null, averageSteps: null, results: [] };
+    }
+    let correct = 0;
+    let solved = 0;
+    let totalSteps = 0;
+    const results = expressions.map(({ expression, expected }) => {
+      try {
+        const solvedResult = this.brain.solveString(expression);
+        const passed = solvedResult.solved && solvedResult.answer === expected;
+        if (passed) correct++;
+        if (solvedResult.solved) solved++;
+        totalSteps += solvedResult.steps;
+        return {
+          expression,
+          expected,
+          actual: solvedResult.answer,
+          solved: solvedResult.solved,
+          steps: solvedResult.steps,
+          passed,
+        };
+      } catch (err) {
+        return {
+          expression,
+          expected,
+          actual: null,
+          solved: false,
+          steps: 0,
+          passed: false,
+          error: err.message,
+        };
+      }
+    });
+    return {
+      evaluated: expressions.length,
+      accuracy: correct / expressions.length,
+      solvedRate: solved / expressions.length,
+      averageSteps: totalSteps / expressions.length,
+      results,
+    };
+  }
+
+  evaluateOOD({ pairs = [], shots = 4 } = {}) {
+    if (!pairs.length) return { evaluated: 0, accuracy: null, results: [] };
+    const results = [];
+    let correct = 0;
+    let total = 0;
+    for (const pair of pairs) {
+      const brain = this.brainFactory();
+      brain.learn(pair.source);
+      const adapted = this._trainFewShot(brain, pair.source, shots);
+      const region = brain.router.route(pair.source.domain);
+      const evalData = pair.ood.validationData || pair.ood.trainingData;
+      const accuracy = region.evaluateAccuracy(evalData);
+      total++;
+      if (accuracy >= 0.5) correct++;
+      results.push({
+        source: pair.source.domain,
+        ood: pair.ood.domain,
+        adaptedAccuracy: adapted.validationAccuracy,
+        oodAccuracy: accuracy,
+      });
+    }
+    return {
+      evaluated: total,
+      accuracy: total === 0 ? null : correct / total,
+      results,
+    };
+  }
+
+  evaluateSampleEfficiency({ lessons = [], shots = [1, 4, 8] } = {}) {
+    const results = shots.map(shotCount => ({
+      shots: shotCount,
+      results: this._fewShotPerformance(lessons, shotCount),
+    }));
+    const summary = results.map(entry => {
+      const accuracies = entry.results.map(r => r.validationAccuracy).filter(v => typeof v === 'number');
+      const avg = accuracies.length ? accuracies.reduce((a, b) => a + b, 0) / accuracies.length : null;
+      return { shots: entry.shots, averageAccuracy: avg };
+    });
+    return { summary, results };
+  }
+
   evaluateTransfer({ pairs = [], shots = 4 } = {}) {
     const results = [];
     for (const pair of pairs) {
@@ -87,7 +183,10 @@ class EvaluationSuite {
     return {
       baseline:      this.baseline({ syllabi, shots }),
       compositional: this.evaluateCompositional({ expressions }),
+      generalization: this.evaluateGeneralization({ lessons: syllabi ? syllabi.flatMap(s => s.lessons || []) : [] }),
+      longHorizon: this.evaluateLongHorizon({ expressions }),
       transfer:      this.evaluateTransfer({ pairs: transferPairs || [], shots }),
+      sampleEfficiency: this.evaluateSampleEfficiency({ lessons: syllabi ? syllabi.flatMap(s => s.lessons || []) : [] }),
       selfDiscovery: this.evaluateSelfDiscovery({ factBase }),
       relations:     this.evaluateRelations({ factBase }),
     };

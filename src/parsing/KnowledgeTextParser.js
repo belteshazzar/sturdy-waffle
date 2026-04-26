@@ -33,14 +33,20 @@ class KnowledgeTextParser {
    * @param {string} [opts.defaultSource='text']
    * @returns {{ statements: object[], queries: object[] }}
    */
-  static parse(text, { mode = 'both', defaultSource = 'text' } = {}) {
+  static parse(text, { mode = 'both', defaultSource = 'text', maxLines = 500, maxLineLength = 1000 } = {}) {
     const statements = [];
     const queries = [];
     if (!text || !text.trim()) return { statements, queries };
 
     const lines = text.split(/\r?\n/);
+    if (lines.length > maxLines) {
+      throw new Error(`KnowledgeTextParser: input exceeds max lines (${maxLines})`);
+    }
     lines.forEach((raw, idx) => {
       const line = raw.trim();
+      if (line.length > maxLineLength) {
+        throw new Error(`KnowledgeTextParser: line ${idx + 1} exceeds max length (${maxLineLength})`);
+      }
       if (!line || line.startsWith('#') || line.startsWith('//')) return;
 
       if ((mode === 'queries' || mode === 'both') && KnowledgeTextParser._looksLikeQuery(line)) {
@@ -288,6 +294,8 @@ class KnowledgeTextParser {
           }
           meta.confidence = num;
         }
+      } else if (key === 'policy') {
+        meta.policy = value.toLowerCase();
       } else if (key === 'source') {
         meta.source = KnowledgeTextParser._stripQuotes(value);
       } else if (key === 'type') {

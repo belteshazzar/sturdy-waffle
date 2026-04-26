@@ -44,11 +44,13 @@ class DecompositionGraph {
     for (const tok of tokens) {
       const tokenId = (tok && typeof tok === 'object') ? tok.token : tok;
       const value = (tok && typeof tok === 'object') ? tok.value : null;
+      const domain = (tok && typeof tok === 'object') ? tok.domain : null;
       this.nodes.push({
         id:       this._nextId++,
         type:     'input',
         token:    tokenId,
         value,
+        domain,
         children: [],
       });
     }
@@ -65,13 +67,14 @@ class DecompositionGraph {
    * @param {number}   result  Value produced by this reduction
    * @returns {number}  ID of the newly created reduce-node
    */
-  addStep(start, op, args, result) {
+  addStep(start, op, args, result, domain = null) {
     const id   = this._nextId++;
     const node = {
       id,
       type:     'reduce',
       token:    op,
       value:    result,
+      domain,
       children: [...args],
     };
     this.nodes.push(node);
@@ -81,6 +84,7 @@ class DecompositionGraph {
       start,
       op,
       opName: TOKEN_NAMES[op] ?? String(op),
+      domain,
       args:   [...args],
       result,
     });
@@ -104,6 +108,7 @@ class DecompositionGraph {
       steps:       this.steps.map(s => ({
         stepNo: s.stepNo,
         op:     s.opName,
+        domain: s.domain || null,
         args:   s.args,
         result: s.result,
       })),

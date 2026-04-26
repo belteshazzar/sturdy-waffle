@@ -55,8 +55,15 @@ class FactBase {
   /**
    * @param {string} [name='Facts']  Human-readable name for this knowledge base.
    */
-  constructor(name = 'Facts') {
-    this.name       = name;
+  constructor(name = 'Facts', opts = {}) {
+    let resolvedName = name;
+    let resolvedOpts = opts;
+    if (name && typeof name === 'object') {
+      resolvedOpts = name;
+      resolvedName = name.name || 'Facts';
+    }
+    this.name       = resolvedName;
+    this.updatePolicy = resolvedOpts.updatePolicy || 'overwrite';
     this.subjects   = [];          // ordered subject vocabulary
     this._facts     = Object.create(null);   // `${subject}:${predicate}` → 0|1
     this._factMeta  = Object.create(null);   // `${subject}:${predicate}` → { confidence?, source? }
@@ -101,7 +108,14 @@ class FactBase {
       this._predicates.push(predicate);
     }
 
-    this._facts[`${subject}:${predicate}`] = value ? 1 : 0;
+    const key = `${subject}:${predicate}`;
+    const existingMeta = this._factMeta[key];
+    if (Object.prototype.hasOwnProperty.call(this._facts, key)) {
+      if (!this._shouldOverwrite(existingMeta, meta)) {
+        return this;
+      }
+    }
+    this._facts[key] = value ? 1 : 0;
     this._storeFactMeta(subject, predicate, meta);
     return this;
   }
@@ -149,6 +163,13 @@ class FactBase {
     if (!this.subjects.includes(subject)) {
       this.subjects.push(subject);
     }
+    const key = `${subject}:${attribute}`;
+    const existingMeta = this._attributeMeta[key];
+    if (Object.prototype.hasOwnProperty.call(this._attributeFacts, key)) {
+      if (!this._shouldOverwrite(existingMeta, meta)) {
+        return this;
+      }
+    }
     if (type === 'categorical') {
       if (!Object.prototype.hasOwnProperty.call(this._attributeVocab, attribute)) {
         this._attributeVocab[attribute] = [];
@@ -156,9 +177,9 @@ class FactBase {
       if (!this._attributeVocab[attribute].includes(value)) {
         this._attributeVocab[attribute].push(value);
       }
-      this._attributeFacts[`${subject}:${attribute}`] = value;
+      this._attributeFacts[key] = value;
     } else {
-      this._attributeFacts[`${subject}:${attribute}`] = value;
+      this._attributeFacts[key] = value;
       const existing = this._attributeTypes[attribute];
       if (existing && existing.type === 'numeric') {
         const range = existing.range || [value, value];
@@ -273,6 +294,12 @@ class FactBase {
       throw new Error(`Relation '${relation}' expects arity ${this._relations[relation].arity}`);
     }
     const key = args.join('|');
+    const existingMeta = this._relationMeta[relation] ? this._relationMeta[relation][key] : null;
+    if (Object.prototype.hasOwnProperty.call(this._relations[relation].facts, key)) {
+      if (!this._shouldOverwrite(existingMeta, meta)) {
+        return this;
+      }
+    }
     this._relations[relation].facts[key] = value ? 1 : 0;
     this._storeRelationMeta(relation, args, meta);
     return this;
@@ -325,6 +352,17 @@ class FactBase {
       this._relationMeta[relation] = Object.create(null);
     }
     this._relationMeta[relation][args.join('|')] = normalized;
+  }
+
+  _shouldOverwrite(existingMeta, incomingMeta) {
+    const policy = incomingMeta?.policy || this.updatePolicy;
+    if (!policy || policy === 'overwrite') return true;
+    if (policy === 'confidence') {
+      const existing = existingMeta?.confidence ?? 0;
+      const incoming = incomingMeta?.confidence ?? 0;
+      return incoming >= existing;
+    }
+    return true;
   }
 
   /**
@@ -540,6 +578,7 @@ class FactBase {
   toJSON() {
     return {
       name:           this.name,
+      updatePolicy:   this.updatePolicy,
       subjects:       [...this.subjects],
       predicates:     [...this._predicates],
       facts:          { ...this._facts },
@@ -562,7 +601,7 @@ class FactBase {
   }
 
   static fromJSON(data) {
-    const fb         = new FactBase(data.name || 'Facts');
+    const fb         = new FactBase(data.name || 'Facts', { updatePolicy: data.updatePolicy });
     fb.subjects      = [...(data.subjects   || [])];
     fb._predicates   = [...(data.predicates || [])];
     fb._facts        = Object.assign(Object.create(null), data.facts || {});

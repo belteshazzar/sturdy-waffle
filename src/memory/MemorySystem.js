@@ -126,6 +126,22 @@ class MemorySystem {
     });
   }
 
+  recordDecompositionStep({ state, action, nextState, reward = null, predictionError = null } = {}) {
+    if (!state || !nextState) return null;
+    const input = Array.isArray(action) ? [...state, ...action] : [...state];
+    const output = Array.isArray(nextState) ? nextState : [nextState];
+    return this.episodic.addEpisode({
+      domain: 'decomposition.step',
+      input,
+      output,
+      tags: ['decomposition', 'planning'],
+      metadata: {
+        reward,
+        predictionError,
+      },
+    });
+  }
+
   consolidateEpisodes({ minSupport = 2 } = {}) {
     const grouped = new Map();
     for (const ep of this.episodic.episodes) {
@@ -174,6 +190,40 @@ class MemorySystem {
       timestamp: Date.now(),
     };
     return { concepts, rules };
+  }
+
+  validate({ strict = false } = {}) {
+    const issues = [];
+    if (!Array.isArray(this.episodic.episodes)) {
+      issues.push('Episodic memory episodes is not an array');
+    } else {
+      this.episodic.episodes.forEach((ep, idx) => {
+        if (!Array.isArray(ep.input)) issues.push(`Episode ${idx} input is not array`);
+        if (!Array.isArray(ep.output)) issues.push(`Episode ${idx} output is not array`);
+        if (strict) {
+          const bad = (arr) => arr.some(v => typeof v !== 'number' || Number.isNaN(v));
+          if (Array.isArray(ep.input) && bad(ep.input)) {
+            issues.push(`Episode ${idx} input contains non-numeric values`);
+          }
+          if (Array.isArray(ep.output) && bad(ep.output)) {
+            issues.push(`Episode ${idx} output contains non-numeric values`);
+          }
+        }
+      });
+    }
+    if (!Array.isArray(this.semantic.facts)) {
+      issues.push('Semantic memory facts is not an array');
+    }
+    if (!Array.isArray(this.semantic.rules)) {
+      issues.push('Semantic memory rules is not an array');
+    }
+    if (!Array.isArray(this.semantic.relations)) {
+      issues.push('Semantic memory relations is not an array');
+    }
+    if (!Array.isArray(this.semantic.concepts)) {
+      issues.push('Semantic memory concepts is not an array');
+    }
+    return { valid: issues.length === 0, issues };
   }
 
   getInfo() {

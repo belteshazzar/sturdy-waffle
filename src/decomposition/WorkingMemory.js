@@ -32,6 +32,7 @@ class WorkingMemory {
     this.maxSlots = maxSlots;
     this.slots    = new Array(maxSlots).fill(TOKEN.NULL);
     this.values   = new Array(maxSlots).fill(null);
+    this.domains  = new Array(maxSlots).fill(null);
     this.length   = 0;   // number of active (non-NULL) slots
   }
 
@@ -45,6 +46,7 @@ class WorkingMemory {
   load(tokens) {
     this.slots  = new Array(this.maxSlots).fill(TOKEN.NULL);
     this.values = new Array(this.maxSlots).fill(null);
+    this.domains = new Array(this.maxSlots).fill(null);
     const n     = Math.min(tokens.length, this.maxSlots);
     for (let i = 0; i < n; i++) {
       const tok = tokens[i];
@@ -60,10 +62,12 @@ class WorkingMemory {
         } else {
           this.values[i] = null;
         }
+        this.domains[i] = tok.domain || null;
       } else {
         this.slots[i] = tok;
         if (tok === TOKEN.V0) this.values[i] = 0;
         if (tok === TOKEN.V1) this.values[i] = 1;
+        this.domains[i] = null;
       }
     }
     this.length = n;
@@ -88,13 +92,16 @@ class WorkingMemory {
     const token = result === 0 ? TOKEN.V0 : result === 1 ? TOKEN.V1 : TOKEN.VALUE;
     this.slots.splice(start, consumed, token);
     this.values.splice(start, consumed, result);
+    this.domains.splice(start, consumed, null);
     // Restore the buffer to exactly maxSlots by appending NULLs
     for (let k = 0; k < arity; k++) {
       this.slots.push(TOKEN.NULL);
       this.values.push(null);
+      this.domains.push(null);
     }
     this.slots = this.slots.slice(0, this.maxSlots);
     this.values = this.values.slice(0, this.maxSlots);
+    this.domains = this.domains.slice(0, this.maxSlots);
     this.length -= arity;                  // net change: removed arity, added 0
   }
 
@@ -146,7 +153,7 @@ class WorkingMemory {
         if (!VALUES.includes(vTok)) { ok = false; break; }
         args.push(this.values[i + j]);
       }
-      if (ok) reductions.push({ start: i, op: tok, args });
+      if (ok) reductions.push({ start: i, op: tok, args, domain: this.domains[i] });
     }
     return reductions;
   }
@@ -218,6 +225,7 @@ class WorkingMemory {
     const m   = new WorkingMemory(this.maxSlots);
     m.slots   = [...this.slots];
     m.values  = [...this.values];
+    m.domains = [...this.domains];
     m.length  = this.length;
     return m;
   }

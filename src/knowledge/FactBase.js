@@ -601,7 +601,7 @@ class FactBase {
    * Normalize metadata objects containing optional confidence/source fields.
    * Returns null when no valid metadata is present.
    *
-   * @param {object} meta
+   * @param {{ confidence?: number, source?: string }} meta
    * @returns {{ confidence?: number, source?: string }|null}
    */
   static _normalizeMeta(meta) {

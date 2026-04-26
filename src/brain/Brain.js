@@ -592,8 +592,7 @@ class Brain extends EventEmitter {
         this.factBase.assert(statement.subject, statement.predicate, statement.value, meta);
         affectedDomains.add(`facts.${statement.predicate}`);
       } else if (statement.kind === 'attribute') {
-        const type = meta.type || (typeof statement.value === 'number' ? 'numeric' : 'categorical');
-        if (type === 'numeric') {
+        if (statement.valueType === 'numeric') {
           this.factBase.defineAttribute(statement.attribute, { type: 'numeric' });
         }
         this.factBase.assertValue(statement.subject, statement.attribute, statement.value, meta);

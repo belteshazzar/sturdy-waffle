@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * KnowledgeTextParser — parse controlled knowledge text into structured
+ * KnowledgeTextParser - parse controlled knowledge text into structured
  * facts, attributes, relations, and queries.
  *
  * Supported statement formats (one per line):
@@ -233,7 +233,8 @@ class KnowledgeTextParser {
     const subject = tokens[0];
     const attribute = tokens[1];
     const value = KnowledgeTextParser._parseValue(rhs, meta);
-    return { kind: 'attribute', subject, attribute, value, meta };
+    const valueType = meta.type || (typeof value === 'number' ? 'numeric' : 'categorical');
+    return { kind: 'attribute', subject, attribute, value, valueType, meta };
   }
 
   static _parseRelation(rest, meta) {

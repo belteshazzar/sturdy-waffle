@@ -490,9 +490,9 @@ class Brain extends EventEmitter {
       );
     }
     const operatorTokens = opts.operatorTokens || decompTokens.OPERATIONS;
-    const resolved = opts.domains || operatorTokens
-      .map(tok => this.resolveTokenDomain(tok))
-      .filter(Boolean);
+    const resolved = opts.domains
+      ? opts.domains
+      : operatorTokens.map(tok => this.resolveTokenDomain(tok)).filter(Boolean);
     const uniqueDomains = [...new Set(resolved)];
     if (uniqueDomains.length === 0) {
       throw new Error(

@@ -2,6 +2,8 @@
 
 const Brain = require('../src/brain/Brain');
 const Lesson = require('../src/learning/Lesson');
+const FactBase = require('../src/knowledge/FactBase');
+const ExpressionParser = require('../src/parsing/ExpressionParser');
 
 describe('Unified input pipeline', () => {
   const andLesson = new Lesson({
@@ -32,5 +34,21 @@ describe('Unified input pipeline', () => {
     brain.learn(andLesson);
     const result = brain.processInput('AND(1,0)').result;
     expect(result).toBe(0);
+  });
+
+  test('processInput handles tokens, knowledge, and query paths', () => {
+    const brain = new Brain();
+    brain.learn(andLesson);
+    const tokens = ExpressionParser.expressionToTokens(
+      ExpressionParser.parseExpression('AND(1,1)')
+    );
+    const tokenResult = brain.processInput(tokens, { execute: false });
+    expect(tokenResult.normalized.kind).toBe('tokens');
+
+    const factBase = new FactBase('Animals');
+    factBase.assert('bird', 'canFly', true);
+    brain.learnFacts(factBase);
+    const queryResult = brain.processInput('Is bird canFly?');
+    expect(queryResult.result[0].value).toBe(1);
   });
 });

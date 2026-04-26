@@ -348,6 +348,21 @@ class FactBase {
     this._relationMeta[relation][args.join('|')] = normalized;
   }
 
+  /**
+   * Decide whether a new assertion should overwrite an existing one.
+   *
+   * Policy precedence:
+   *   1) Incoming metadata policy (meta.policy)
+   *   2) FactBase instance updatePolicy
+   *
+   * Supported policies:
+   *   - 'overwrite': always overwrite
+   *   - 'confidence': overwrite only when incoming confidence >= existing
+   *
+   * @param {{ confidence?: number }|null} existingMeta
+   * @param {{ confidence?: number, policy?: string }|null} incomingMeta
+   * @returns {boolean}
+   */
   _shouldOverwrite(existingMeta, incomingMeta) {
     const policy = incomingMeta?.policy || this.updatePolicy;
     if (!policy || policy === 'overwrite') return true;

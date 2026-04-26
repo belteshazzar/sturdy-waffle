@@ -17,11 +17,6 @@ const MODULE_CAPABILITIES = Object.freeze({
   parsing:       ['perception'],
 });
 
-function _mean(values) {
-  if (!values.length) return null;
-  return values.reduce((acc, v) => acc + v, 0) / values.length;
-}
-
 function buildCapabilityMatrix({ brain, targets = {} } = {}) {
   const resolvedTargets = {
     ...DEFAULT_TARGETS,
@@ -30,7 +25,9 @@ function buildCapabilityMatrix({ brain, targets = {} } = {}) {
 
   const regionInfos = brain ? Array.from(brain.regions.values()).map(r => r.getInfo()) : [];
   const regionAccuracies = regionInfos.map(info => info.accuracy).filter(v => typeof v === 'number');
-  const averageAccuracy = _mean(regionAccuracies);
+  const averageAccuracy = regionAccuracies.length
+    ? regionAccuracies.reduce((acc, v) => acc + v, 0) / regionAccuracies.length
+    : null;
 
   const memoryInfo = brain?.memory?.getInfo?.() || null;
   const worldInfo = brain?.worldModel?.getInfo?.() || null;

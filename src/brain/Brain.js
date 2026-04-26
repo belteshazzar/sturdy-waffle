@@ -553,21 +553,7 @@ class Brain extends EventEmitter {
    */
   tokenizeExpression(exprString, { resolveFacts = false, maxTokens, maxDepth } = {}) {
     const limits = this.config.inputLimits || {};
-    const factResolver = resolveFacts
-      ? node => {
-        if (node.subject) {
-          return node.infer
-            ? this.inferFact(node.subject, node.predicate).value
-            : this.queryFact(node.subject, node.predicate);
-        }
-        if (node.name) {
-          return node.infer
-            ? this.inferRelation(node.name, node.args).value
-            : this.queryRelation(node.name, node.args);
-        }
-        return null;
-      }
-      : null;
+    const factResolver = resolveFacts ? this._createFactResolver() : null;
     return ExpressionParser.toTokenStream(exprString, {
       factResolver,
       maxTokens: maxTokens ?? limits.maxTokens,
@@ -841,7 +827,7 @@ class Brain extends EventEmitter {
    *  - query: parsed knowledge/expression queries
    */
   normalizeInput(input, opts = {}) {
-    if (!input && input !== 0) {
+    if (input == null) {
       throw new Error('normalizeInput: input is required');
     }
 
@@ -905,20 +891,9 @@ class Brain extends EventEmitter {
     if (normalized.kind === 'expression') {
       const mode = opts.mode || 'evaluate';
       if (mode === 'solve') {
-        const factResolver = node => {
-          if (node.subject) {
-            return node.infer
-              ? this.inferFact(node.subject, node.predicate).value
-              : this.queryFact(node.subject, node.predicate);
-          }
-          if (node.name) {
-            return node.infer
-              ? this.inferRelation(node.name, node.args).value
-              : this.queryRelation(node.name, node.args);
-          }
-          return null;
-        };
-        const tokens = ExpressionParser.expressionToTokens(normalized.expression, { factResolver });
+        const tokens = ExpressionParser.expressionToTokens(normalized.expression, {
+          factResolver: this._createFactResolver(),
+        });
         return { normalized, result: this.solve(tokens, opts.solveOptions || {}) };
       }
       return { normalized, result: this.evaluate(normalized.expression) };
@@ -1118,6 +1093,22 @@ class Brain extends EventEmitter {
       sum += Math.abs(predicted[i] - actual[i]);
     }
     return sum / n;
+  }
+
+  _createFactResolver() {
+    return node => {
+      if (node.subject) {
+        return node.infer
+          ? this.inferFact(node.subject, node.predicate).value
+          : this.queryFact(node.subject, node.predicate);
+      }
+      if (node.name) {
+        return node.infer
+          ? this.inferRelation(node.name, node.args).value
+          : this.queryRelation(node.name, node.args);
+      }
+      return null;
+    };
   }
 
   // ── Decomposition controller ──────────────────────────────────────────────
@@ -1511,19 +1502,7 @@ class Brain extends EventEmitter {
     if (!tokenIds) {
       const limits = this.config.inputLimits || {};
       tokenIds = ExpressionParser.toTokenStream(exprString, {
-        factResolver: node => {
-          if (node.subject) {
-            return node.infer
-              ? this.inferFact(node.subject, node.predicate).value
-              : this.queryFact(node.subject, node.predicate);
-          }
-          if (node.name) {
-            return node.infer
-              ? this.inferRelation(node.name, node.args).value
-              : this.queryRelation(node.name, node.args);
-          }
-          return null;
-        },
+        factResolver: this._createFactResolver(),
         maxTokens: limits.maxTokens,
         maxDepth: limits.maxDepth,
       });
@@ -1716,19 +1695,7 @@ class Brain extends EventEmitter {
     const tokens = normalized.kind === 'tokens'
       ? normalized.tokens
       : ExpressionParser.expressionToTokens(normalized.expression, {
-        factResolver: node => {
-          if (node.subject) {
-            return node.infer
-              ? this.inferFact(node.subject, node.predicate).value
-              : this.queryFact(node.subject, node.predicate);
-          }
-          if (node.name) {
-            return node.infer
-              ? this.inferRelation(node.name, node.args).value
-              : this.queryRelation(node.name, node.args);
-          }
-          return null;
-        },
+        factResolver: this._createFactResolver(),
       });
 
     if (!this.controller) {

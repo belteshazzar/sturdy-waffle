@@ -259,7 +259,11 @@ class Brain extends EventEmitter {
 
   /**
    * Resolve a decomposition operator token to a trained domain.
+   *
    * Uses the token's name (e.g. AND) and defers to _resolveExpressionDomain().
+   * Returns null when the token is not an operator or when no matching domain
+   * can be resolved from trained regions.
+   *
    * @param {number} opToken
    * @returns {string|null}
    * @private
@@ -272,7 +276,7 @@ class Brain extends EventEmitter {
   }
 
   /**
-   * Resolve a decomposition operator token to a trained domain.
+   * Public wrapper for resolving decomposition operator tokens to domains.
    *
    * Returns the resolved domain name when the token corresponds to a known
    * operator and a matching trained region can be found; otherwise returns null.
@@ -694,11 +698,18 @@ class Brain extends EventEmitter {
       }
       if (!domain) domain = this._resolveTokenDomain(action.op);
 
-      if (!domain || !this.router.hasRoute(domain)) {
-        const opName = decompTokens.TOKEN_NAMES[action.op] ?? String(action.op);
+      const opName = decompTokens.TOKEN_NAMES[action.op] ?? String(action.op);
+      if (!domain) {
+        throw new Error(
+          `solve(): operator '${opName}' (token ${action.op}) could not be ` +
+          'mapped to any trained specialist domain. Train the relevant syllabus ' +
+          'and (optionally) a learned router first.'
+        );
+      }
+      if (!this.router.hasRoute(domain)) {
         throw new Error(
           `solve(): operator '${opName}' (token ${action.op}) maps to ` +
-          `domain '${domain || 'unknown'}' with no trained specialist. ` +
+          `domain '${domain}' with no trained specialist. ` +
           'Train the relevant syllabus and (optionally) a learned router first.'
         );
       }

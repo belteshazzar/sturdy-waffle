@@ -7,6 +7,20 @@ const {
   FactBase,
 } = require('..');
 
+const originalRandom = Math.random;
+
+beforeEach(() => {
+  let seed = 42;
+  Math.random = () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+});
+
+afterEach(() => {
+  Math.random = originalRandom;
+});
+
 describe('advanced learning extensions', () => {
   test('records episodic + semantic memory and supports inference', () => {
     const brain = new Brain();

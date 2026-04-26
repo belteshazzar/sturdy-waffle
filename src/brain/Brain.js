@@ -638,7 +638,7 @@ class Brain extends EventEmitter {
     const nearest = this.memory.episodic.query({ domain, input, limit: 1 });
     if (!nearest.length) return 1;
     const length = input.length || 1;
-    const distance = Math.abs(nearest[0].input.reduce((acc, v, i) => acc + Math.abs(v - input[i]), 0));
+    const distance = nearest[0].input.reduce((acc, v, i) => acc + Math.abs(v - input[i]), 0);
     return Math.min(1, distance / length);
   }
 
@@ -1009,9 +1009,9 @@ class Brain extends EventEmitter {
       });
     }
     if (this.worldModel) {
-      const ordered = [...episodes].sort((a, b) => a.timestamp - b.timestamp);
-      for (let i = 0; i < ordered.length - 1; i++) {
-        this.worldModel.observe(ordered[i].input, ordered[i + 1].input);
+      episodes.sort((a, b) => a.timestamp - b.timestamp);
+      for (let i = 0; i < episodes.length - 1; i++) {
+        this.worldModel.observe(episodes[i].input, episodes[i + 1].input);
       }
     }
     return {

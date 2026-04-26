@@ -87,6 +87,15 @@ class NeuralNetwork {
     return { output: current, activations, zValues };
   }
 
+  _getAnchorLayer(regularization, layerIndex, layer) {
+    if (!regularization || !regularization.anchor || !regularization.anchor.layers) return null;
+    const anchorLayer = regularization.anchor.layers[layerIndex];
+    if (!anchorLayer || !anchorLayer.weights.length) return null;
+    if (anchorLayer.weights.length !== layer.weights.length) return null;
+    if (anchorLayer.weights[0].length !== layer.weights[0].length) return null;
+    return anchorLayer;
+  }
+
   /**
    * Return only the output vector (convenience wrapper around forward).
    * @param {number[]} input
@@ -149,23 +158,17 @@ class NeuralNetwork {
     for (let l = 0; l < numLayers; l++) {
       const layer     = this.layers[l];
       const prevActs  = activations[l];
-      const anchorLayer = regularization && regularization.anchor && regularization.anchor.layers
-        ? regularization.anchor.layers[l]
-        : null;
-      const hasAnchor = anchorLayer &&
-        anchorLayer.weights.length === layer.weights.length &&
-        anchorLayer.weights[0] &&
-        anchorLayer.weights[0].length === layer.weights[0].length;
+      const anchorLayer = this._getAnchorLayer(regularization, l, layer);
 
       for (let i = 0; i < layer.weights.length; i++) {
         for (let j = 0; j < layer.weights[i].length; j++) {
           layer.weights[i][j] -= this.learningRate * deltas[l][i] * prevActs[j];
-          if (hasAnchor) {
+          if (anchorLayer) {
             layer.weights[i][j] -= this.learningRate * regularization.lambda * (layer.weights[i][j] - anchorLayer.weights[i][j]);
           }
         }
         layer.biases[i] -= this.learningRate * deltas[l][i];
-        if (hasAnchor) {
+        if (anchorLayer) {
           layer.biases[i] -= this.learningRate * regularization.lambda * (layer.biases[i] - anchorLayer.biases[i]);
         }
       }
@@ -219,22 +222,16 @@ class NeuralNetwork {
     for (let l = 0; l < numLayers; l++) {
       const layer    = this.layers[l];
       const prevActs = activations[l];
-      const anchorLayer = regularization && regularization.anchor && regularization.anchor.layers
-        ? regularization.anchor.layers[l]
-        : null;
-      const hasAnchor = anchorLayer &&
-        anchorLayer.weights.length === layer.weights.length &&
-        anchorLayer.weights[0] &&
-        anchorLayer.weights[0].length === layer.weights[0].length;
+      const anchorLayer = this._getAnchorLayer(regularization, l, layer);
       for (let i = 0; i < layer.weights.length; i++) {
         for (let j = 0; j < layer.weights[i].length; j++) {
           layer.weights[i][j] -= this.learningRate * deltas[l][i] * prevActs[j];
-          if (hasAnchor) {
+          if (anchorLayer) {
             layer.weights[i][j] -= this.learningRate * regularization.lambda * (layer.weights[i][j] - anchorLayer.weights[i][j]);
           }
         }
         layer.biases[i] -= this.learningRate * deltas[l][i];
-        if (hasAnchor) {
+        if (anchorLayer) {
           layer.biases[i] -= this.learningRate * regularization.lambda * (layer.biases[i] - anchorLayer.biases[i]);
         }
       }

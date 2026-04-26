@@ -17,6 +17,10 @@ class EpisodicMemory {
     this._nextId  = 1;
   }
 
+  _signature(domain, input) {
+    return `${domain}:${input.map(v => v.toFixed(3)).join(',')}`;
+  }
+
   addEpisode({ domain, input, output, tags = [], metadata = {} }) {
     const episode = {
       id:        this._nextId++,
@@ -25,6 +29,7 @@ class EpisodicMemory {
       output:    [...output],
       tags:      [...tags],
       metadata:  { ...metadata },
+      signature: this._signature(domain, input),
       timestamp: Date.now(),
     };
     this.episodes.push(episode);

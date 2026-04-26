@@ -57,7 +57,7 @@ class MemorySystem {
   consolidateEpisodes({ minSupport = 2 } = {}) {
     const grouped = new Map();
     for (const ep of this.episodic.episodes) {
-      const signature = `${ep.domain}:${ep.input.map(v => v.toFixed(3)).join(',')}`;
+      const signature = ep.signature || `${ep.domain}:${ep.input.map(v => v.toFixed(3)).join(',')}`;
       if (!grouped.has(signature)) {
         grouped.set(signature, { domain: ep.domain, input: ep.input, outputs: [], support: 0 });
       }

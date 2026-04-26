@@ -162,12 +162,13 @@ class EvaluationSuite {
     const region = brain.router.route(lesson.domain);
     const validationData = lesson.validationData || lesson.trainingData;
     const validationAccuracy = region.evaluateAccuracy(validationData);
+    const trainingAccuracy = region.evaluateAccuracy(trainingData);
     return {
       domain: lesson.domain,
       shots,
       validationAccuracy,
-      trainingAccuracy: region.evaluateAccuracy(trainingData),
-      generalizationGap: region.evaluateAccuracy(trainingData) - validationAccuracy,
+      trainingAccuracy,
+      generalizationGap: trainingAccuracy - validationAccuracy,
     };
   }
 }

@@ -12,6 +12,7 @@ class SemanticMemory {
     this.facts    = [];
     this.rules    = [];
     this.concepts = [];
+    this._nextRuleId = 1;
   }
 
   addFact({ subject, predicate, value, confidence = 1, source = 'observation' }) {
@@ -35,7 +36,7 @@ class SemanticMemory {
 
   addRule({ name, when, then, confidence = 0.5, support = 1, source = 'induction' }) {
     const rule = {
-      name: name || `rule:${then.predicate}:${this.rules.length + 1}`,
+      name: name || `rule:${then.predicate}:${this._nextRuleId++}`,
       when: when || [],
       then,
       confidence,
@@ -176,10 +177,13 @@ class SemanticMemory {
   _trim() {
     while (this.facts.length + this.rules.length + this.concepts.length > this.capacity) {
       if (this.concepts.length > 0) {
+        this.concepts.sort((a, b) => a.confidence - b.confidence);
         this.concepts.shift();
       } else if (this.rules.length > 0) {
+        this.rules.sort((a, b) => a.confidence - b.confidence);
         this.rules.shift();
       } else {
+        this.facts.sort((a, b) => a.confidence - b.confidence);
         this.facts.shift();
       }
     }
@@ -200,6 +204,7 @@ class SemanticMemory {
       facts:    this.facts,
       rules:    this.rules,
       concepts: this.concepts,
+      nextRuleId: this._nextRuleId,
     };
   }
 
@@ -208,6 +213,7 @@ class SemanticMemory {
     mem.facts    = [...(data.facts || [])];
     mem.rules    = [...(data.rules || [])];
     mem.concepts = [...(data.concepts || [])];
+    mem._nextRuleId = data.nextRuleId || (mem.rules.length + 1);
     return mem;
   }
 }

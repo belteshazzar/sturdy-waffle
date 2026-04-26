@@ -116,7 +116,7 @@ class BrainRegion extends EventEmitter {
         architecture: baseNetwork.architecture,
         mode: lesson.mode,
       });
-      if (initialWeights && initialWeights.architecture.join(',') === baseNetwork.architecture.join(',')) {
+      if (initialWeights && this._sameArchitecture(initialWeights.architecture, baseNetwork.architecture)) {
         this.network = NeuralNetwork.fromJSON(initialWeights);
       }
     }
@@ -177,6 +177,11 @@ class BrainRegion extends EventEmitter {
   _prepareInput(input) {
     const normInput = this._normalizeInput(input);
     return this.sharedEmbedding ? this.sharedEmbedding.embed(normInput) : normInput;
+  }
+
+  _sameArchitecture(a, b) {
+    if (!a || !b || a.length !== b.length) return false;
+    return a.every((value, idx) => value === b[idx]);
   }
 
   setReplaySamples(samples = []) {

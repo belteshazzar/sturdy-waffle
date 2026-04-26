@@ -1690,7 +1690,7 @@ class Brain extends EventEmitter {
     return report;
   }
 
-  planActObserve({ input, maxSteps, exploreWeight, predictionWeight: predictionWeightOverride } = {}) {
+  planActObserve({ input, maxSteps, exploreWeight, predictionWeight } = {}) {
     const normalized = this.normalizeInput(input, { mode: 'solve' });
     const tokens = normalized.kind === 'tokens'
       ? normalized.tokens
@@ -1711,7 +1711,7 @@ class Brain extends EventEmitter {
     let steps = 0;
     const budget = maxSteps ?? this.config.planning.maxSteps;
     const explore = exploreWeight ?? this.config.planning.exploreWeight;
-    const predictionWeight = predictionWeightOverride ?? this.config.planning.predictionWeight;
+    const resolvedPredictionWeight = predictionWeight ?? this.config.planning.predictionWeight;
 
     while (!mem.isSolved() && steps < budget) {
       const candidates = mem.validReductions();
@@ -1745,7 +1745,7 @@ class Brain extends EventEmitter {
 
         const solvedBonus = simulated.isSolved() ? 1 : 0;
         const novelty = this._estimateNovelty('decomposition.step', actionVec);
-        const score = solvedBonus - predictionWeight * predictionError + explore * novelty;
+        const score = solvedBonus - resolvedPredictionWeight * predictionError + explore * novelty;
         if (score > bestScore) {
           bestScore = score;
           best = candidate;
@@ -1753,6 +1753,7 @@ class Brain extends EventEmitter {
       });
 
       if (!best) {
+        // Fallback: force exploration when no scored candidate is available.
         best = this.controller.selectAction(mem, true);
         if (!best) break;
       }

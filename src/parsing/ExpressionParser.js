@@ -16,6 +16,12 @@ class ExpressionParser {
       throw new Error(`ExpressionParser: input exceeds max length (${maxLength})`);
     }
     const tokens = [];
+    const pushToken = (token) => {
+      tokens.push(token);
+      if (tokens.length > maxTokens) {
+        throw new Error(`ExpressionParser: too many tokens (>${maxTokens})`);
+      }
+    };
     let i = 0;
     const src = input.trim();
     const isIdentStart = ch => /[A-Za-z_]/.test(ch);
@@ -24,10 +30,7 @@ class ExpressionParser {
       const ch = src[i];
       if (/\s/.test(ch)) { i++; continue; }
       if (ch === '(' || ch === ')' || ch === ',') {
-        tokens.push({ type: ch, value: ch });
-        if (tokens.length > maxTokens) {
-          throw new Error(`ExpressionParser: too many tokens (>${maxTokens})`);
-        }
+        pushToken({ type: ch, value: ch });
         i++;
         continue;
       }
@@ -40,10 +43,7 @@ class ExpressionParser {
           j++;
         }
         if (j >= src.length) throw new Error('ExpressionParser: unterminated string literal');
-        tokens.push({ type: 'string', value });
-        if (tokens.length > maxTokens) {
-          throw new Error(`ExpressionParser: too many tokens (>${maxTokens})`);
-        }
+        pushToken({ type: 'string', value });
         i = j + 1;
         continue;
       }
@@ -65,20 +65,14 @@ class ExpressionParser {
         const raw = src.slice(i, j);
         const value = Number(raw);
         if (Number.isNaN(value)) throw new Error(`ExpressionParser: invalid number '${raw}'`);
-        tokens.push({ type: 'number', value });
-        if (tokens.length > maxTokens) {
-          throw new Error(`ExpressionParser: too many tokens (>${maxTokens})`);
-        }
+        pushToken({ type: 'number', value });
         i = j;
         continue;
       }
       if (isIdentStart(ch)) {
         let j = i + 1;
         while (j < src.length && isIdentChar(src[j])) j++;
-        tokens.push({ type: 'identifier', value: src.slice(i, j) });
-        if (tokens.length > maxTokens) {
-          throw new Error(`ExpressionParser: too many tokens (>${maxTokens})`);
-        }
+        pushToken({ type: 'identifier', value: src.slice(i, j) });
         i = j;
         continue;
       }

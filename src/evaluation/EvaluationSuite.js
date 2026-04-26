@@ -84,7 +84,6 @@ class EvaluationSuite {
           steps: 0,
           passed: false,
           error: err.message,
-          errorExpression: expression,
         };
       }
     });

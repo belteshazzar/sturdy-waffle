@@ -1380,7 +1380,7 @@ class Brain extends EventEmitter {
         : region.predictBinary(action.args)[0];
 
       const actionVec = this._encodeAction(action, mem);
-      const prediction = (this.worldModel && this.config.worldModelLoop.enabled)
+      const prediction = (this.worldModel && this.config.worldModelLoop.enabled && stateVec)
         ? this.worldModel.predict(stateVec, { action: actionVec })
         : null;
 
@@ -1400,7 +1400,7 @@ class Brain extends EventEmitter {
 
       const nextStateVec = mem.toVector(this.controller.embeddingTable || null);
       const predictionError = prediction ? this._predictionError(prediction, nextStateVec) : null;
-      if (this.worldModel && this.config.worldModelLoop.enabled) {
+      if (this.worldModel && this.config.worldModelLoop.enabled && stateVec && nextStateVec) {
         this.worldModel.observe(stateVec, nextStateVec, { action: actionVec });
       }
       this.memory.recordDecompositionStep({
@@ -1736,7 +1736,7 @@ class Brain extends EventEmitter {
         const nextVec = simulated.toVector(this.controller.embeddingTable || null);
 
         let predictionError = 1;
-        if (this.worldModel) {
+        if (this.worldModel && stateVec) {
           const predicted = this.worldModel.predict(stateVec, { action: actionVec });
           if (predicted) {
             predictionError = this._predictionError(predicted, nextVec);
@@ -1772,12 +1772,14 @@ class Brain extends EventEmitter {
         : region.predictBinary(action.args)[0];
 
       const actionVec = this._encodeAction(action, mem);
-      const prediction = this.worldModel ? this.worldModel.predict(stateVec, { action: actionVec }) : null;
+      const prediction = (this.worldModel && stateVec)
+        ? this.worldModel.predict(stateVec, { action: actionVec })
+        : null;
 
       mem.reduce(action.start, decompTokens.ARITY[action.op], result);
       const nextVec = mem.toVector(this.controller.embeddingTable || null);
       const predictionError = prediction ? this._predictionError(prediction, nextVec) : null;
-      if (this.worldModel && this.config.worldModelLoop.enabled) {
+      if (this.worldModel && this.config.worldModelLoop.enabled && stateVec && nextVec) {
         this.worldModel.observe(stateVec, nextVec, { action: actionVec });
       }
       this.memory.recordDecompositionStep({

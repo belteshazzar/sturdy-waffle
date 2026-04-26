@@ -7,8 +7,21 @@ const { TOKEN, OP_DOMAIN_HINTS } = require('../decomposition/tokens');
  * and token streams compatible with Brain.evaluate() and the decomposition engine.
  */
 class ExpressionParser {
-  static tokenize(input) {
+  static tokenize(input, opts = {}) {
+    const { maxTokens = 512, maxLength = 20000 } = opts;
+    if (typeof input !== 'string') {
+      throw new Error('ExpressionParser: input must be a string');
+    }
+    if (input.length > maxLength) {
+      throw new Error(`ExpressionParser: input exceeds max length (${maxLength})`);
+    }
     const tokens = [];
+    const pushToken = (token) => {
+      tokens.push(token);
+      if (tokens.length > maxTokens) {
+        throw new Error(`ExpressionParser: too many tokens (>${maxTokens})`);
+      }
+    };
     let i = 0;
     const src = input.trim();
     const isIdentStart = ch => /[A-Za-z_]/.test(ch);
@@ -17,7 +30,7 @@ class ExpressionParser {
       const ch = src[i];
       if (/\s/.test(ch)) { i++; continue; }
       if (ch === '(' || ch === ')' || ch === ',') {
-        tokens.push({ type: ch, value: ch });
+        pushToken({ type: ch, value: ch });
         i++;
         continue;
       }
@@ -30,7 +43,7 @@ class ExpressionParser {
           j++;
         }
         if (j >= src.length) throw new Error('ExpressionParser: unterminated string literal');
-        tokens.push({ type: 'string', value });
+        pushToken({ type: 'string', value });
         i = j + 1;
         continue;
       }
@@ -52,14 +65,14 @@ class ExpressionParser {
         const raw = src.slice(i, j);
         const value = Number(raw);
         if (Number.isNaN(value)) throw new Error(`ExpressionParser: invalid number '${raw}'`);
-        tokens.push({ type: 'number', value });
+        pushToken({ type: 'number', value });
         i = j;
         continue;
       }
       if (isIdentStart(ch)) {
         let j = i + 1;
         while (j < src.length && isIdentChar(src[j])) j++;
-        tokens.push({ type: 'identifier', value: src.slice(i, j) });
+        pushToken({ type: 'identifier', value: src.slice(i, j) });
         i = j;
         continue;
       }
@@ -68,11 +81,15 @@ class ExpressionParser {
     return tokens;
   }
 
-  static parseExpression(input) {
-    const tokens = Array.isArray(input) ? input : ExpressionParser.tokenize(input);
+  static parseExpression(input, opts = {}) {
+    const tokens = Array.isArray(input) ? input : ExpressionParser.tokenize(input, opts);
     let index = 0;
+    const { maxDepth = 64 } = opts;
 
-    const parseNode = () => {
+    const parseNode = (depth = 0) => {
+      if (depth > maxDepth) {
+        throw new Error(`ExpressionParser: max depth ${maxDepth} exceeded`);
+      }
       const tok = tokens[index];
       if (!tok) throw new Error('ExpressionParser: unexpected end of input');
       if (tok.type === 'number') {
@@ -91,7 +108,7 @@ class ExpressionParser {
           index++; // consume '('
           const args = [];
           while (index < tokens.length && tokens[index].type !== ')') {
-            args.push(parseNode());
+            args.push(parseNode(depth + 1));
             if (tokens[index] && tokens[index].type === ',') index++;
           }
           if (!tokens[index] || tokens[index].type !== ')') {
@@ -163,8 +180,8 @@ class ExpressionParser {
     return false;
   }
 
-  static toTokenStream(exprString, { factResolver } = {}) {
-    const expr = ExpressionParser.parseExpression(exprString);
+  static toTokenStream(exprString, { factResolver, maxTokens, maxDepth } = {}) {
+    const expr = ExpressionParser.parseExpression(exprString, { maxTokens, maxDepth });
     return ExpressionParser.expressionToTokens(expr, { factResolver });
   }
 
@@ -193,10 +210,14 @@ class ExpressionParser {
     if (opToken === undefined) {
       throw new Error(`ExpressionParser: unknown operator '${expression.op}'`);
     }
+    const opEntry = { token: opToken };
+    if (expression.domain) {
+      opEntry.domain = expression.domain;
+    }
     const children = expression.inputs.flatMap(child =>
       ExpressionParser.expressionToTokens(child, { factResolver })
     );
-    return [{ token: opToken }, ...children];
+    return [opEntry, ...children];
   }
 
   static _valueToken(value) {

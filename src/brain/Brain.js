@@ -12,6 +12,7 @@ const SelfSupervisedLearner = require('../learning/SelfSupervisedLearner');
 const WorldModel       = require('../world/WorldModel');
 const ExpressionParser = require('../parsing/ExpressionParser');
 const KnowledgeTextParser = require('../parsing/KnowledgeTextParser');
+const { buildCapabilityMatrix, DEFAULT_TARGETS: DEFAULT_CAPABILITY_TARGETS } = require('../evaluation/CapabilityMatrix');
 
 // Decomposition modules (loaded lazily to avoid circular deps at startup)
 const {
@@ -108,6 +109,29 @@ class Brain extends EventEmitter {
         uncertaintyWeight: 0.7,
         noveltyWeight:     0.3,
       },
+      factUpdatePolicy: 'overwrite',
+      inputLimits: {
+        maxTokens:     512,
+        maxDepth:      64,
+        maxLines:      200,
+        maxLineLength: 1000,
+      },
+      knowledgeConsolidation: {
+        enabled:            true,
+        onSyllabusComplete: true,
+        onFactUpdate:       true,
+        minSupport:         2,
+        minConfidence:      0.8,
+      },
+      worldModelLoop: {
+        enabled: true,
+      },
+      planning: {
+        exploreWeight:     0.2,
+        predictionWeight:  1,
+        maxSteps:          32,
+      },
+      capabilityTargets: DEFAULT_CAPABILITY_TARGETS,
     };
 
     this.config = {
@@ -148,6 +172,26 @@ class Brain extends EventEmitter {
       activeLearning: {
         ...defaults.activeLearning,
         ...(config.activeLearning || {}),
+      },
+      inputLimits: {
+        ...defaults.inputLimits,
+        ...(config.inputLimits || {}),
+      },
+      knowledgeConsolidation: {
+        ...defaults.knowledgeConsolidation,
+        ...(config.knowledgeConsolidation || {}),
+      },
+      worldModelLoop: {
+        ...defaults.worldModelLoop,
+        ...(config.worldModelLoop || {}),
+      },
+      planning: {
+        ...defaults.planning,
+        ...(config.planning || {}),
+      },
+      capabilityTargets: {
+        ...defaults.capabilityTargets,
+        ...(config.capabilityTargets || {}),
       },
     };
 
@@ -274,6 +318,7 @@ class Brain extends EventEmitter {
 
     this._updateKnowledgeTree(domain);
     this.memory.recordLesson(lesson);
+    this._validateMemory('lesson');
     if (this.metaLearner && region.network && region.network.layers) {
       this.metaLearner.registerRegion(region);
     }
@@ -303,6 +348,7 @@ class Brain extends EventEmitter {
     }));
 
     this.emit('syllabus:complete', { name: syllabus.name, results });
+    this._maybeConsolidate('syllabus');
     return results;
   }
 
@@ -487,37 +533,32 @@ class Brain extends EventEmitter {
   /**
    * Parse a human-readable expression string to a structured tree.
    */
-  parseExpression(exprString) {
-    return ExpressionParser.parseExpression(exprString);
+  parseExpression(exprString, opts = {}) {
+    const limits = this.config.inputLimits || {};
+    return ExpressionParser.parseExpression(exprString, {
+      maxTokens: opts.maxTokens ?? limits.maxTokens,
+      maxDepth:  opts.maxDepth ?? limits.maxDepth,
+    });
   }
 
   /**
    * Evaluate a raw expression string using the standard evaluate() pathway.
    */
-  evaluateString(exprString) {
-    return this.evaluate(this.parseExpression(exprString));
+  evaluateString(exprString, opts = {}) {
+    return this.evaluate(this.parseExpression(exprString, opts));
   }
 
   /**
    * Convert an expression string to a decomposition-ready token stream.
    */
-  tokenizeExpression(exprString, { resolveFacts = false } = {}) {
-    const factResolver = resolveFacts
-      ? node => {
-        if (node.subject) {
-          return node.infer
-            ? this.inferFact(node.subject, node.predicate).value
-            : this.queryFact(node.subject, node.predicate);
-        }
-        if (node.name) {
-          return node.infer
-            ? this.inferRelation(node.name, node.args).value
-            : this.queryRelation(node.name, node.args);
-        }
-        return null;
-      }
-      : null;
-    return ExpressionParser.toTokenStream(exprString, { factResolver });
+  tokenizeExpression(exprString, { resolveFacts = false, maxTokens, maxDepth } = {}) {
+    const limits = this.config.inputLimits || {};
+    const factResolver = resolveFacts ? this._createFactResolver() : null;
+    return ExpressionParser.toTokenStream(exprString, {
+      factResolver,
+      maxTokens: maxTokens ?? limits.maxTokens,
+      maxDepth:  maxDepth ?? limits.maxDepth,
+    });
   }
 
   // ── Knowledge checks ──────────────────────────────────────────────────────
@@ -553,6 +594,7 @@ class Brain extends EventEmitter {
   learnFacts(factBase) {
     this.factBase = factBase;
     this.memory.recordFactBase(factBase);
+    this._validateMemory('factBase');
 
     const results = factBase.toLessons().map(lesson => ({
       predicate: lesson.domain.split('.')[1],
@@ -561,6 +603,7 @@ class Brain extends EventEmitter {
     }));
 
     this.memory.semantic.induceRulesFromFactBase(factBase);
+    this._maybeConsolidate('factUpdate');
     return results;
   }
 
@@ -577,17 +620,31 @@ class Brain extends EventEmitter {
    */
   learnText(text, opts = {}) {
     const { name = 'TextFacts', source = 'text', retrain = true } = opts;
-    const { statements } = KnowledgeTextParser.parse(text, { mode: 'statements', defaultSource: source });
+    const limits = this.config.inputLimits || {};
+    const { statements } = KnowledgeTextParser.parse(text, {
+      mode: 'statements',
+      defaultSource: source,
+      maxLines: limits.maxLines,
+      maxLineLength: limits.maxLineLength,
+    });
     if (statements.length === 0) {
+      return { statements: [], trainedDomains: [], results: [] };
+    }
+    return this.learnStatements(statements, { name, source, retrain });
+  }
+
+  learnStatements(statements, opts = {}) {
+    const { name = 'TextFacts', source = 'text', retrain = true } = opts;
+    if (!Array.isArray(statements) || statements.length === 0) {
       return { statements: [], trainedDomains: [], results: [] };
     }
 
     if (!this.factBase) {
-      this.factBase = new FactBase(name);
+      this.factBase = new FactBase(name, { updatePolicy: this.config.factUpdatePolicy });
     }
     const affectedDomains = new Set();
     statements.forEach(statement => {
-      const meta = statement.meta || {};
+      const meta = { source, ...(statement.meta || {}) };
       if (statement.kind === 'fact') {
         this.factBase.assert(statement.subject, statement.predicate, statement.value, meta);
         affectedDomains.add(`facts.${statement.predicate}`);
@@ -604,6 +661,7 @@ class Brain extends EventEmitter {
     });
 
     this.memory.recordTextStatements(statements, { defaultSource: source });
+    this._validateMemory('textFacts');
 
     let results = [];
     if (retrain) {
@@ -614,7 +672,7 @@ class Brain extends EventEmitter {
       }));
     }
     this.memory.semantic.induceRulesFromFactBase(this.factBase);
-
+    this._maybeConsolidate('factUpdate');
     return { statements, trainedDomains: [...affectedDomains], results };
   }
 
@@ -707,7 +765,12 @@ class Brain extends EventEmitter {
    * @returns {object[]}
    */
   parseTextQuery(text) {
-    return KnowledgeTextParser.parse(text, { mode: 'queries' }).queries;
+    const limits = this.config.inputLimits || {};
+    return KnowledgeTextParser.parse(text, {
+      mode: 'queries',
+      maxLines: limits.maxLines,
+      maxLineLength: limits.maxLineLength,
+    }).queries;
   }
 
   /**
@@ -718,6 +781,10 @@ class Brain extends EventEmitter {
    */
   answerText(text) {
     const queries = this.parseTextQuery(text);
+    return this.answerQueries(queries);
+  }
+
+  answerQueries(queries) {
     return queries.map(query => {
       if (query.kind === 'fact') {
         if (query.infer) {
@@ -745,6 +812,118 @@ class Brain extends EventEmitter {
       }
       throw new Error(`Unknown query kind '${query.kind}'`);
     });
+  }
+
+  /**
+   * Normalize heterogeneous input into a shared representation.
+   *
+   * Supported kinds:
+   *  - expression: structured expression tree
+   *  - tokens: decomposition token stream
+   *  - knowledge: parsed knowledge statements
+   *  - query: parsed knowledge/expression queries
+   */
+  normalizeInput(input, opts = {}) {
+    if (input == null) {
+      throw new Error('normalizeInput: input is required');
+    }
+
+    if (Array.isArray(input)) {
+      return { kind: 'tokens', tokens: input };
+    }
+
+    if (typeof input === 'string') {
+      const limits = this.config.inputLimits || {};
+      let parsed = null;
+      try {
+        parsed = KnowledgeTextParser.parse(input, {
+          mode: 'both',
+          defaultSource: opts.source || 'text',
+          maxLines: limits.maxLines,
+          maxLineLength: limits.maxLineLength,
+        });
+      } catch (err) {
+        if (opts.strictKnowledge) throw err;
+        parsed = null;
+      }
+      if (parsed && (parsed.statements.length || parsed.queries.length)) {
+        if ((opts.prefer === 'statements' || opts.mode === 'learn') && parsed.statements.length) {
+          return { kind: 'knowledge', statements: parsed.statements, raw: input };
+        }
+        if (parsed.queries.length) {
+          return { kind: 'query', queries: parsed.queries, raw: input };
+        }
+        return { kind: 'knowledge', statements: parsed.statements, raw: input };
+      }
+      return {
+        kind: 'expression',
+        expression: this.parseExpression(input, opts),
+        raw: input,
+      };
+    }
+
+    if (typeof input === 'object') {
+      if (input.kind) return input;
+      if (input.tokens) return { kind: 'tokens', tokens: input.tokens };
+      if (input.expression) return { kind: 'expression', expression: input.expression };
+      if (input.statements) return { kind: 'knowledge', statements: input.statements };
+      if (input.queries) return { kind: 'query', queries: input.queries };
+      if (input.op || input.value !== undefined || input.fact || input.relation) {
+        return { kind: 'expression', expression: input };
+      }
+    }
+
+    throw new Error('normalizeInput: unsupported input format');
+  }
+
+  /**
+   * Unified entry point for text, expressions, tokens, and knowledge updates.
+   */
+  processInput(input, opts = {}) {
+    const normalized = this.normalizeInput(input, opts);
+    if (opts.execute === false) {
+      return { normalized, result: null };
+    }
+
+    if (normalized.kind === 'expression') {
+      const mode = opts.mode || 'evaluate';
+      if (mode === 'solve') {
+        const tokens = ExpressionParser.expressionToTokens(normalized.expression, {
+          factResolver: this._createFactResolver(),
+        });
+        return { normalized, result: this.solve(tokens, opts.solveOptions || {}) };
+      }
+      return { normalized, result: this.evaluate(normalized.expression) };
+    }
+
+    if (normalized.kind === 'tokens') {
+      return { normalized, result: this.solve(normalized.tokens, opts.solveOptions || {}) };
+    }
+
+    if (normalized.kind === 'knowledge') {
+      if (opts.learn === false) {
+        return { normalized, result: normalized.statements };
+      }
+      if (normalized.statements && normalized.statements.length) {
+        return {
+          normalized,
+          result: this.learnStatements(normalized.statements, opts.learnOptions || {}),
+        };
+      }
+      return {
+        normalized,
+        result: this.learnText(normalized.raw || '', opts.learnOptions || {}),
+      };
+    }
+
+    if (normalized.kind === 'query') {
+      return {
+        normalized,
+        result: normalized.queries ? this.answerQueries(normalized.queries) : this.answerText(normalized.raw || ''),
+      };
+    }
+
+    throw new Error(`processInput: unsupported kind '${normalized.kind}'`);
   }
 
   // ── Reasoning & discovery ──────────────────────────────────────────────────
@@ -889,6 +1068,44 @@ class Brain extends EventEmitter {
     const length = Math.max(1, flatInput.length);
     const distance = flatNearest.reduce((acc, v, i) => acc + Math.abs(v - (flatInput[i] || 0)), 0);
     return Math.min(1, distance / length);
+  }
+
+  _encodeAction(action, mem) {
+    const maxToken = Math.max(1, decompTokens.VOCAB_SIZE - 1);
+    const maxSlots = Math.max(1, (mem?.maxSlots || 16) - 1);
+    const arity = decompTokens.ARITY[action.op] || 1;
+    return [
+      action.op / maxToken,
+      action.start / maxSlots,
+      arity / 3,
+    ];
+  }
+
+  _predictionError(predicted, actual) {
+    if (!predicted || !actual) return null;
+    const n = Math.min(predicted.length, actual.length);
+    if (n === 0) return null;
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      sum += Math.abs(predicted[i] - actual[i]);
+    }
+    return sum / n;
+  }
+
+  _createFactResolver() {
+    return node => {
+      if (node.subject) {
+        return node.infer
+          ? this.inferFact(node.subject, node.predicate).value
+          : this.queryFact(node.subject, node.predicate);
+      }
+      if (node.name) {
+        return node.infer
+          ? this.inferRelation(node.name, node.args).value
+          : this.queryRelation(node.name, node.args);
+      }
+      return null;
+    };
   }
 
   // ── Decomposition controller ──────────────────────────────────────────────
@@ -1123,10 +1340,14 @@ class Brain extends EventEmitter {
         break;
       }
 
+      const stateVec = mem.toVector(this.controller.embeddingTable || null);
+
       // ── Phase 3: domain resolution ──────────────────────────────────────────
       // Try LearnedRouter first; fall back to operator-name resolution.
       let domain = null;
-      if (this.learnedRouter && this.controller.embeddingTable) {
+      const domainHint = action.domain || mem.domains[action.start] || null;
+      if (domainHint) domain = domainHint;
+      if (!domainHint && this.learnedRouter && this.controller.embeddingTable) {
         const opEmb  = this.controller.embeddingTable.lookup(action.op);
         const result = this.learnedRouter.route(opEmb);
         if (result.aboveThreshold) domain = result.domain;
@@ -1155,8 +1376,13 @@ class Brain extends EventEmitter {
         ? region.predict(action.args)[0]
         : region.predictBinary(action.args)[0];
 
+      const actionVec = this._encodeAction(action, mem);
+      const prediction = (this.worldModel && this.config.worldModelLoop.enabled && stateVec)
+        ? this.worldModel.predict(stateVec, { action: actionVec })
+        : null;
+
       trace.push({
-        stateVec:    mem.toVector(this.controller.embeddingTable || null),
+        stateVec,
         rawSlots:    [...mem.slots],
         rawValues:   [...mem.values],
         chosenStart: action.start,
@@ -1165,9 +1391,22 @@ class Brain extends EventEmitter {
         result,
       });
 
-      graph.addStep(action.start, action.op, action.args, result);
+      graph.addStep(action.start, action.op, action.args, result, domain);
       mem.reduce(action.start, decompTokens.ARITY[action.op], result);
       steps++;
+
+      const nextStateVec = mem.toVector(this.controller.embeddingTable || null);
+      const predictionError = prediction ? this._predictionError(prediction, nextStateVec) : null;
+      if (this.worldModel && this.config.worldModelLoop.enabled && stateVec && nextStateVec) {
+        this.worldModel.observe(stateVec, nextStateVec, { action: actionVec });
+      }
+      this.memory.recordDecompositionStep({
+        state: stateVec,
+        action: actionVec,
+        nextState: nextStateVec,
+        reward: mem.isSolved() ? 1 : 0,
+        predictionError,
+      });
 
       this.emit('decomposition:step', {
         step:   steps,
@@ -1176,6 +1415,8 @@ class Brain extends EventEmitter {
         result,
         memory: mem.slots.slice(0, mem.length),
         values: mem.values.slice(0, mem.length),
+        domain,
+        predictionError,
       });
     }
 
@@ -1256,20 +1497,11 @@ class Brain extends EventEmitter {
       }
     }
     if (!tokenIds) {
+      const limits = this.config.inputLimits || {};
       tokenIds = ExpressionParser.toTokenStream(exprString, {
-        factResolver: node => {
-          if (node.subject) {
-            return node.infer
-              ? this.inferFact(node.subject, node.predicate).value
-              : this.queryFact(node.subject, node.predicate);
-          }
-          if (node.name) {
-            return node.infer
-              ? this.inferRelation(node.name, node.args).value
-              : this.queryRelation(node.name, node.args);
-          }
-          return null;
-        },
+        factResolver: this._createFactResolver(),
+        maxTokens: limits.maxTokens,
+        maxDepth: limits.maxDepth,
       });
     }
     return this.solve(tokenIds, opts);
@@ -1411,6 +1643,10 @@ class Brain extends EventEmitter {
     return this.worldModel.rollout(state, { actions, context, steps });
   }
 
+  getCapabilityMatrix({ targets } = {}) {
+    return buildCapabilityMatrix({ brain: this, targets: targets || this.config.capabilityTargets });
+  }
+
   baselineReport({ syllabi = [], shots = 4 } = {}) {
     const EvaluationSuite = require('../evaluation/EvaluationSuite');
     const suite = new EvaluationSuite({
@@ -1427,6 +1663,154 @@ class Brain extends EventEmitter {
       brainFactory: () => new Brain(this.config),
     });
     return suite.runAll({ syllabi, expressions, transferPairs, factBase, shots });
+  }
+
+  _maybeConsolidate(reason) {
+    const policy = this.config.knowledgeConsolidation;
+    if (!policy || !policy.enabled) return null;
+    if (reason === 'syllabus' && !policy.onSyllabusComplete) return null;
+    if (reason === 'factUpdate' && !policy.onFactUpdate) return null;
+    const result = this.memory.consolidate({
+      factBase: this.factBase,
+      minSupport: policy.minSupport,
+      minConfidence: policy.minConfidence,
+    });
+    this.emit('memory:consolidated', { reason, ...result });
+    return result;
+  }
+
+  _validateMemory(context) {
+    const report = this.memory.validate({ strict: false });
+    if (!report.valid) {
+      this.emit('memory:corrupt', { context, ...report });
+    }
+    return report;
+  }
+
+  planActObserve({ input, maxSteps, exploreWeight, predictionErrorWeight } = {}) {
+    const normalized = this.normalizeInput(input, { mode: 'solve' });
+    const tokens = normalized.kind === 'tokens'
+      ? normalized.tokens
+      : ExpressionParser.expressionToTokens(normalized.expression, {
+        factResolver: this._createFactResolver(),
+      });
+
+    if (!this.controller) {
+      throw new Error(
+        'planActObserve() requires a decomposition controller. ' +
+        'Call brain.initController() then brain.trainDecomposition() first.'
+      );
+    }
+
+    const mem = new WorkingMemory();
+    mem.load(tokens);
+    const trace = [];
+    let steps = 0;
+    const budget = maxSteps ?? this.config.planning.maxSteps;
+    const explore = exploreWeight ?? this.config.planning.exploreWeight;
+    const predictionWeight = predictionErrorWeight ?? this.config.planning.predictionWeight;
+
+    while (!mem.isSolved() && steps < budget) {
+      const candidates = mem.validReductions();
+      if (candidates.length === 0) break;
+
+      const stateVec = mem.toVector(this.controller.embeddingTable || null);
+      let best = null;
+      let bestScore = -Infinity;
+
+      candidates.forEach(candidate => {
+        const domainHint = candidate.domain || mem.domains[candidate.start] || null;
+        const resolvedDomain = domainHint || this.resolveTokenDomain(candidate.op);
+        const region = resolvedDomain ? this.router.route(resolvedDomain) : null;
+        if (!region) return;
+        const result = (region.lesson && region.lesson.mode === 'regression')
+          ? region.predict(candidate.args)[0]
+          : region.predictBinary(candidate.args)[0];
+
+        const actionVec = this._encodeAction(candidate, mem);
+        const simulated = mem.clone();
+        simulated.reduce(candidate.start, decompTokens.ARITY[candidate.op], result);
+        const nextVec = simulated.toVector(this.controller.embeddingTable || null);
+
+        let predictionError = 1;
+        if (this.worldModel && stateVec) {
+          const predicted = this.worldModel.predict(stateVec, { action: actionVec });
+          if (predicted) {
+            const computed = this._predictionError(predicted, nextVec);
+            if (computed !== null) predictionError = computed;
+          }
+        }
+
+        const solvedBonus = simulated.isSolved() ? 1 : 0;
+        const novelty = this._estimateNovelty('decomposition.step', actionVec);
+        const errorTerm = predictionError ?? 1;
+        const score = solvedBonus - predictionWeight * errorTerm + explore * novelty;
+        if (score > bestScore) {
+          bestScore = score;
+          best = candidate;
+        }
+      });
+
+      if (!best) {
+        // Fallback: force exploration when no scored candidate is available.
+        this.emit('planning:fallback', {
+          reason: 'no-scored-candidates',
+          step: steps,
+          memory: mem.slots.slice(0, mem.length),
+        });
+        best = this.controller.selectAction(mem, true);
+        if (!best) break;
+      }
+
+      const action = best;
+      let domain = action.domain || mem.domains[action.start] || null;
+      if (!domain) {
+        domain = this.resolveTokenDomain(action.op);
+      }
+      const region = this.router.route(domain);
+      if (!region) {
+        throw new Error(`planActObserve(): no brain region found for domain '${domain}'`);
+      }
+
+      const result = (region.lesson && region.lesson.mode === 'regression')
+        ? region.predict(action.args)[0]
+        : region.predictBinary(action.args)[0];
+
+      const actionVec = this._encodeAction(action, mem);
+      const prediction = (this.worldModel && stateVec)
+        ? this.worldModel.predict(stateVec, { action: actionVec })
+        : null;
+
+      mem.reduce(action.start, decompTokens.ARITY[action.op], result);
+      const nextVec = mem.toVector(this.controller.embeddingTable || null);
+      const predictionError = prediction ? this._predictionError(prediction, nextVec) : null;
+      if (this.worldModel && this.config.worldModelLoop.enabled && stateVec && nextVec) {
+        this.worldModel.observe(stateVec, nextVec, { action: actionVec });
+      }
+      this.memory.recordDecompositionStep({
+        state: stateVec,
+        action: actionVec,
+        nextState: nextVec,
+        reward: mem.isSolved() ? 1 : 0,
+        predictionError,
+      });
+
+      trace.push({
+        step: steps + 1,
+        action,
+        domain,
+        result,
+        predictionError,
+      });
+      steps++;
+    }
+
+    return {
+      solved: mem.isSolved(),
+      answer: mem.answer(),
+      steps,
+      trace,
+    };
   }
 
   // ── Diagnostics ──────────────────────────────────────────────────────────
@@ -1509,6 +1893,7 @@ class Brain extends EventEmitter {
       worldModel:       this.worldModel ? this.worldModel.getInfo() : null,
       memory:           this.memory.getInfo(),
       diagnostics:      this.getDiagnostics(),
+      capabilityMatrix: this.getCapabilityMatrix(),
       capabilityGaps: Object.fromEntries(
         Object.entries(regions).map(([domain, info]) => [
           domain,

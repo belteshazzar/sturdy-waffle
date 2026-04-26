@@ -45,6 +45,7 @@ const { TOKEN, VOCAB_SIZE } = tokens;
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const EMBED_DIM = 4;   // small dim for fast tests
+const ROUTER_DOMAINS = ['boolean.AND', 'boolean.OR'];
 
 /** Minimal Brain trained on AND/OR/NOT/XOR gates */
 function makeFastBoolBrain() {
@@ -676,12 +677,10 @@ describe('Brain — Phase 3 LearnedRouter', () => {
 // ── 12. Brain toJSON/fromJSON with all phases ─────────────────────────────────
 
 describe('Brain serialisation with learned components', () => {
-  const routerDomains = ['boolean.AND', 'boolean.OR'];
-
   test('toJSON/fromJSON preserves learnedRouter', () => {
     const brain = new Brain();
     brain.initController({ embeddingDim: EMBED_DIM });
-    brain.initLearnedRouter({ domains: routerDomains });
+    brain.initLearnedRouter({ domains: ROUTER_DOMAINS });
     const json    = brain.toJSON();
     expect(json.learnedRouter).not.toBeNull();
     const brain2  = Brain.fromJSON(json);
@@ -703,7 +702,7 @@ describe('Brain serialisation with learned components', () => {
   test('introspect() includes learnedRouter and stringEncoder', () => {
     const brain = new Brain();
     brain.initController({ embeddingDim: EMBED_DIM });
-    brain.initLearnedRouter({ domains: routerDomains });
+    brain.initLearnedRouter({ domains: ROUTER_DOMAINS });
     brain.stringEncoder = new StringEncoder({ vocabSize: VOCAB_SIZE });
     const info = brain.introspect();
     expect(info.learnedRouter).not.toBeNull();

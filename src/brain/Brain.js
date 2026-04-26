@@ -272,6 +272,15 @@ class Brain extends EventEmitter {
   }
 
   /**
+   * Resolve a decomposition operator token to a trained domain.
+   * @param {number} opToken
+   * @returns {string|null}
+   */
+  resolveTokenDomain(opToken) {
+    return this._resolveTokenDomain(opToken);
+  }
+
+  /**
    * Recursively evaluate a nested expression tree using the appropriate brain
    * region for each node.
    *
@@ -470,7 +479,8 @@ class Brain extends EventEmitter {
    * Requires the controller to be in embedding mode (embeddingDim set).
    *
    * @param {object} [opts]
-   * @param {string[]} [opts.domains]  Override the domain list (default: resolve from trained regions)
+   * @param {string[]} [opts.domains]
+   *   Override the domain list; when provided, auto-resolution from tokens is skipped.
    * @param {number[]} [opts.operatorTokens]  Operator tokens used for discovery (default: decompTokens.OPERATIONS)
    * @param {number}   [opts.confidenceThreshold=0.7]
    * @returns {LearnedRouter}

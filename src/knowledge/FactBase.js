@@ -104,10 +104,9 @@ class FactBase {
 
     const key = `${subject}:${predicate}`;
     const existingMeta = this._factMeta[key];
-    if (Object.prototype.hasOwnProperty.call(this._facts, key)) {
-      if (!this._shouldOverwrite(existingMeta, meta)) {
-        return this;
-      }
+    const hasExisting = Object.prototype.hasOwnProperty.call(this._facts, key);
+    if (!this._shouldUpdate(hasExisting, existingMeta, meta)) {
+      return this;
     }
     this._facts[key] = value ? 1 : 0;
     this._storeFactMeta(subject, predicate, meta);
@@ -159,10 +158,9 @@ class FactBase {
     }
     const key = `${subject}:${attribute}`;
     const existingMeta = this._attributeMeta[key];
-    if (Object.prototype.hasOwnProperty.call(this._attributeFacts, key)) {
-      if (!this._shouldOverwrite(existingMeta, meta)) {
-        return this;
-      }
+    const hasExisting = Object.prototype.hasOwnProperty.call(this._attributeFacts, key);
+    if (!this._shouldUpdate(hasExisting, existingMeta, meta)) {
+      return this;
     }
     if (type === 'categorical') {
       if (!Object.prototype.hasOwnProperty.call(this._attributeVocab, attribute)) {
@@ -289,10 +287,9 @@ class FactBase {
     }
     const key = args.join('|');
     const existingMeta = this._relationMeta[relation] ? this._relationMeta[relation][key] : null;
-    if (Object.prototype.hasOwnProperty.call(this._relations[relation].facts, key)) {
-      if (!this._shouldOverwrite(existingMeta, meta)) {
-        return this;
-      }
+    const hasExisting = Object.prototype.hasOwnProperty.call(this._relations[relation].facts, key);
+    if (!this._shouldUpdate(hasExisting, existingMeta, meta)) {
+      return this;
     }
     this._relations[relation].facts[key] = value ? 1 : 0;
     this._storeRelationMeta(relation, args, meta);
@@ -372,6 +369,11 @@ class FactBase {
       return incoming >= existing;
     }
     return true;
+  }
+
+  _shouldUpdate(hasExisting, existingMeta, incomingMeta) {
+    if (!hasExisting) return true;
+    return this._shouldOverwrite(existingMeta, incomingMeta);
   }
 
   /**

@@ -65,6 +65,7 @@ function resolveFact(node, factBase) {
 }
 
 function createMixedExpressionSyllabus() {
+  // Create a fresh fact base instance for this syllabus build.
   const factBase = createMixedExpressionFactBase();
   const trainingData = EXPRESSIONS.map(expr => {
     const tree = ExpressionParser.parseExpression(expr);

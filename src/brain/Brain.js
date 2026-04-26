@@ -592,9 +592,6 @@ class Brain extends EventEmitter {
    * @returns {Array<{ predicate: string, domain: string, trained: boolean, accuracy: number }>}
    */
   learnFacts(factBase) {
-    if (factBase && this.config.factUpdatePolicy) {
-      factBase.updatePolicy = this.config.factUpdatePolicy;
-    }
     this.factBase = factBase;
     this.memory.recordFactBase(factBase);
     this._validateMemory('factBase');
@@ -1711,7 +1708,7 @@ class Brain extends EventEmitter {
     let steps = 0;
     const budget = maxSteps ?? this.config.planning.maxSteps;
     const explore = exploreWeight ?? this.config.planning.exploreWeight;
-    const resolvedPredictionWeight = predictionErrorWeight ?? this.config.planning.predictionWeight;
+    const predictionWeight = predictionErrorWeight ?? this.config.planning.predictionWeight;
 
     while (!mem.isSolved() && steps < budget) {
       const candidates = mem.validReductions();
@@ -1747,7 +1744,7 @@ class Brain extends EventEmitter {
         const solvedBonus = simulated.isSolved() ? 1 : 0;
         const novelty = this._estimateNovelty('decomposition.step', actionVec);
         const errorTerm = predictionError ?? 1;
-        const score = solvedBonus - resolvedPredictionWeight * errorTerm + explore * novelty;
+        const score = solvedBonus - predictionWeight * errorTerm + explore * novelty;
         if (score > bestScore) {
           bestScore = score;
           best = candidate;
@@ -1756,6 +1753,11 @@ class Brain extends EventEmitter {
 
       if (!best) {
         // Fallback: force exploration when no scored candidate is available.
+        this.emit('planning:fallback', {
+          reason: 'no-scored-candidates',
+          step: steps,
+          memory: mem.slots.slice(0, mem.length),
+        });
         best = this.controller.selectAction(mem, true);
         if (!best) break;
       }

@@ -703,6 +703,9 @@ class Brain extends EventEmitter {
 
   /**
    * Parse text queries into structured query objects.
+   *
+   * @param {string} text
+   * @returns {object[]}
    */
   parseTextQuery(text) {
     return KnowledgeTextParser.parse(text, { mode: 'queries' }).queries;

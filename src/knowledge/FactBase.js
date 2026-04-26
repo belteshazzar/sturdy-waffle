@@ -186,16 +186,37 @@ class FactBase {
     return this;
   }
 
+  /**
+   * Retrieve metadata for a (subject, predicate) fact pair.
+   *
+   * @param {string} subject
+   * @param {string} predicate
+   * @returns {{ confidence?: number, source?: string }|null}
+   */
   getFactMeta(subject, predicate) {
     const key = `${subject}:${predicate}`;
     return this._factMeta[key] ? { ...this._factMeta[key] } : null;
   }
 
+  /**
+   * Retrieve metadata for a (subject, attribute) pair.
+   *
+   * @param {string} subject
+   * @param {string} attribute
+   * @returns {{ confidence?: number, source?: string }|null}
+   */
   getAttributeMeta(subject, attribute) {
     const key = `${subject}:${attribute}`;
     return this._attributeMeta[key] ? { ...this._attributeMeta[key] } : null;
   }
 
+  /**
+   * Retrieve metadata for a relation fact.
+   *
+   * @param {string} relation
+   * @param {string[]} args
+   * @returns {{ confidence?: number, source?: string }|null}
+   */
   getRelationMeta(relation, args) {
     const entry = this._relationMeta[relation];
     if (!entry) return null;
@@ -576,6 +597,13 @@ class FactBase {
     return fb;
   }
 
+  /**
+   * Normalize metadata objects containing optional confidence/source fields.
+   * Returns null when no valid metadata is present.
+   *
+   * @param {object} meta
+   * @returns {{ confidence?: number, source?: string }|null}
+   */
   static _normalizeMeta(meta) {
     if (!meta || typeof meta !== 'object') return null;
     const normalized = {};

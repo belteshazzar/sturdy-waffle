@@ -10,9 +10,7 @@ function translateLine(line, opts = {}) {
   const cleaned = cleanQuestion(line);
   if (!cleaned) return null;
 
-  const lower = cleaned.toLowerCase();
-
-  let match = lower.match(/^(who|what)\s+is\s+(.+)$/i);
+  let match = cleaned.match(/^(who|what)\s+is\s+(.+)$/i);
   if (match) {
     const subject = normalizeEntity(match[2]);
     if (subject) {
@@ -20,7 +18,7 @@ function translateLine(line, opts = {}) {
     }
   }
 
-  match = lower.match(/^what\s+type\s+of\s+(.+)$/i);
+  match = cleaned.match(/^what\s+type\s+of\s+(.+)$/i);
   if (match) {
     const subject = normalizeEntity(match[1]);
     if (subject) {
@@ -28,7 +26,7 @@ function translateLine(line, opts = {}) {
     }
   }
 
-  match = lower.match(/^(when\s+was|when\s+is)\s+(.+)\s+born$/i);
+  match = cleaned.match(/^(when\s+was|when\s+is)\s+(.+)\s+born$/i);
   if (match) {
     const subject = normalizeEntity(match[2]);
     if (subject) {
@@ -36,7 +34,7 @@ function translateLine(line, opts = {}) {
     }
   }
 
-  match = lower.match(/^(where\s+was|where\s+is)\s+(.+)\s+born$/i);
+  match = cleaned.match(/^(where\s+was|where\s+is)\s+(.+)\s+born$/i);
   if (match) {
     const subject = normalizeEntity(match[2]);
     if (subject) {
@@ -44,7 +42,7 @@ function translateLine(line, opts = {}) {
     }
   }
 
-  match = lower.match(/^(where\s+is|where\s+was)\s+(.+)\s+located$/i);
+  match = cleaned.match(/^(where\s+is|where\s+was)\s+(.+)\s+located$/i);
   if (match) {
     const subject = normalizeEntity(match[2]);
     if (subject) {
@@ -52,7 +50,7 @@ function translateLine(line, opts = {}) {
     }
   }
 
-  match = lower.match(/^where\s+is\s+(.+)$/i);
+  match = cleaned.match(/^where\s+is\s+(.+)$/i);
   if (match) {
     const subject = normalizeEntity(match[1]);
     if (subject) {

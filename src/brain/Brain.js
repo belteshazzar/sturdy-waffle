@@ -797,12 +797,22 @@ class Brain extends EventEmitter {
    */
   answerFreeForm(text, opts = {}) {
     const limits = this.config.inputLimits || {};
+    const lines = (text || '').split(/\r?\n/);
     const parsed = KnowledgeTextParser.parse(text || '', {
       mode: 'queries',
       maxLines: limits.maxLines,
       maxLineLength: limits.maxLineLength,
     });
-    const existingQueries = parsed.queries || [];
+    const existingQueries = (parsed.queries || []).filter(query => {
+      if (!query.line) return true;
+      const rawLine = lines[query.line - 1] || '';
+      const trimmed = rawLine.trim().toLowerCase();
+      if (!trimmed) return true;
+      if (query.kind === 'fact' && /^(where|when|who|what|how)\b/.test(trimmed)) {
+        return false;
+      }
+      return true;
+    });
     const translated = FreeFormQueryTranslator.translate(text || '', {
       ...opts,
       skipLines: existingQueries.map(query => query.line).filter(Boolean),

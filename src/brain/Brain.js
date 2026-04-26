@@ -264,23 +264,6 @@ class Brain extends EventEmitter {
    * Returns null when the token is not an operator or when no matching domain
    * can be resolved from trained regions.
    *
-   * @param {number} opToken
-   * @returns {string|null}
-   * @private
-   */
-  _resolveTokenDomain(opToken) {
-    if (!decompTokens.OPERATIONS.includes(opToken)) return null;
-    const opName = decompTokens.TOKEN_NAMES[opToken];
-    if (!opName) return null;
-    return this._resolveExpressionDomain({ op: opName });
-  }
-
-  /**
-   * Public wrapper for resolving decomposition operator tokens to domains.
-   *
-   * Returns the resolved domain name when the token corresponds to a known
-   * operator and a matching trained region can be found; otherwise returns null.
-   *
    * Example:
    *   brain.resolveTokenDomain(decompTokens.TOKEN.AND) // → "boolean.AND"
    *
@@ -288,7 +271,10 @@ class Brain extends EventEmitter {
    * @returns {string|null}
    */
   resolveTokenDomain(opToken) {
-    return this._resolveTokenDomain(opToken);
+    if (!decompTokens.OPERATIONS.includes(opToken)) return null;
+    const opName = decompTokens.TOKEN_NAMES[opToken];
+    if (!opName) return null;
+    return this._resolveExpressionDomain({ op: opName });
   }
 
   /**
@@ -505,7 +491,7 @@ class Brain extends EventEmitter {
     }
     const operatorTokens = opts.operatorTokens || decompTokens.OPERATIONS;
     const resolved = opts.domains || operatorTokens
-      .map(tok => this._resolveTokenDomain(tok))
+      .map(tok => this.resolveTokenDomain(tok))
       .filter(Boolean);
     const uniqueDomains = [...new Set(resolved)];
     if (uniqueDomains.length === 0) {
@@ -574,7 +560,7 @@ class Brain extends EventEmitter {
           (opTok, args) => {
             // Prefer a trained specialist for evaluation fidelity; fall back to
             // the deterministic truth table (supplied by the curriculum).
-            const domain = this._resolveTokenDomain(opTok);
+            const domain = this.resolveTokenDomain(opTok);
             if (domain && this.router.hasRoute(domain)) {
               return this.predictBinary(args, domain)[0];
             }
@@ -607,7 +593,7 @@ class Brain extends EventEmitter {
       for (const stage of stages) {
         for (const problem of stage.problems) {
           for (const tok of problem.tokens) {
-            const domain = this._resolveTokenDomain(tok);
+            const domain = this.resolveTokenDomain(tok);
             if (!domain) continue;
             const domainIdx = this.learnedRouter.domains.indexOf(domain);
             if (domainIdx < 0) continue;
@@ -696,10 +682,10 @@ class Brain extends EventEmitter {
         const result = this.learnedRouter.route(opEmb);
         if (result.aboveThreshold) domain = result.domain;
       }
-      if (!domain) domain = this._resolveTokenDomain(action.op);
+      if (!domain) domain = this.resolveTokenDomain(action.op);
 
-      const opName = decompTokens.TOKEN_NAMES[action.op] ?? String(action.op);
       if (!domain) {
+        const opName = decompTokens.TOKEN_NAMES[action.op] ?? String(action.op);
         throw new Error(
           `solve(): operator '${opName}' (token ${action.op}) could not be ` +
           'mapped to any trained specialist domain. Train the relevant syllabus ' +
@@ -707,6 +693,7 @@ class Brain extends EventEmitter {
         );
       }
       if (!this.router.hasRoute(domain)) {
+        const opName = decompTokens.TOKEN_NAMES[action.op] ?? String(action.op);
         throw new Error(
           `solve(): operator '${opName}' (token ${action.op}) maps to ` +
           `domain '${domain}' with no trained specialist. ` +

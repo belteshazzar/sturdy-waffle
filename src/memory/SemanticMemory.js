@@ -10,6 +10,7 @@ class SemanticMemory {
   constructor({ capacity = 2000 } = {}) {
     this.capacity = capacity;
     this.facts    = [];
+    this.relations = [];
     this.rules    = [];
     this.concepts = [];
     this._nextRuleId = 1;
@@ -32,6 +33,27 @@ class SemanticMemory {
     this.facts.push(fact);
     this._trim();
     return fact;
+  }
+
+  addRelationFact({ relation, args, value, confidence = 1, source = 'observation' }) {
+    const signature = `${relation}(${args.join('|')})`;
+    const existing = this.relations.find(r => r.signature === signature);
+    const rel = {
+      relation,
+      args: [...args],
+      value,
+      confidence,
+      source,
+      signature,
+      updatedAt: Date.now(),
+    };
+    if (existing) {
+      Object.assign(existing, rel);
+      return existing;
+    }
+    this.relations.push(rel);
+    this._trim();
+    return rel;
   }
 
   addRule({ name, when, then, confidence = 0.5, support = 1, source = 'induction' }) {
@@ -72,6 +94,10 @@ class SemanticMemory {
     );
   }
 
+  queryRelations({ relation } = {}) {
+    return this.relations.filter(r => (relation ? r.relation === relation : true));
+  }
+
   inferFromRules({ subject, predicate, factBase }) {
     const candidates = this.rules.filter(rule => rule.then.predicate === predicate);
     let best = null;
@@ -85,6 +111,38 @@ class SemanticMemory {
         if (cond.type === 'attribute') {
           const val = factBase.getValue(subject, cond.key);
           return val !== null && val === cond.value;
+        }
+        return false;
+      });
+      if (matches && (!best || rule.confidence > best.confidence)) {
+        best = rule;
+      }
+    }
+    if (!best) return null;
+    return {
+      value:      best.then.value,
+      confidence: best.confidence,
+      source:     `rule:${best.name}`,
+    };
+  }
+
+  inferRelationFromRules({ relation, args, factBase }) {
+    const candidates = this.rules.filter(rule => rule.then && rule.then.relation === relation);
+    let best = null;
+    for (const rule of candidates) {
+      const matches = rule.when.every(cond => {
+        if (!factBase) return false;
+        if (cond.type === 'predicate') {
+          const val = factBase.get(args[0], cond.key);
+          return val !== null && val === cond.value;
+        }
+        if (cond.type === 'attribute') {
+          const val = factBase.getValue(args[0], cond.key);
+          return val !== null && val === cond.value;
+        }
+        if (cond.type === 'relation') {
+          const relVal = factBase.getRelation(cond.name, cond.args);
+          return relVal !== null && relVal === cond.value;
         }
         return false;
       });
@@ -176,13 +234,16 @@ class SemanticMemory {
   }
 
   _trim() {
-    while (this.facts.length + this.rules.length + this.concepts.length > this.capacity) {
+    while (this.facts.length + this.rules.length + this.concepts.length + this.relations.length > this.capacity) {
       if (this.concepts.length > 0) {
         this.concepts.sort((a, b) => a.confidence - b.confidence);
         this.concepts.shift();
       } else if (this.rules.length > 0) {
         this.rules.sort((a, b) => a.confidence - b.confidence);
         this.rules.shift();
+      } else if (this.relations.length > 0) {
+        this.relations.sort((a, b) => a.confidence - b.confidence);
+        this.relations.shift();
       } else {
         this.facts.sort((a, b) => a.confidence - b.confidence);
         this.facts.shift();
@@ -192,7 +253,8 @@ class SemanticMemory {
 
   _generateRuleName(name, then) {
     if (name) return name;
-    const generated = `rule:${then.predicate}:${this._nextRuleId}`;
+    const key = then.predicate || then.relation || 'unknown';
+    const generated = `rule:${key}:${this._nextRuleId}`;
     this._nextRuleId++;
     return generated;
   }
@@ -201,6 +263,7 @@ class SemanticMemory {
     return {
       capacity:    this.capacity,
       factCount:   this.facts.length,
+      relationCount: this.relations.length,
       ruleCount:   this.rules.length,
       conceptCount: this.concepts.length,
     };
@@ -210,6 +273,7 @@ class SemanticMemory {
     return {
       capacity: this.capacity,
       facts:    this.facts,
+      relations: this.relations,
       rules:    this.rules,
       concepts: this.concepts,
       nextRuleId: this._nextRuleId,
@@ -219,6 +283,7 @@ class SemanticMemory {
   static fromJSON(data) {
     const mem = new SemanticMemory({ capacity: data.capacity });
     mem.facts    = [...(data.facts || [])];
+    mem.relations = [...(data.relations || [])];
     mem.rules    = [...(data.rules || [])];
     mem.concepts = [...(data.concepts || [])];
     mem._nextRuleId = data.nextRuleId || (mem.rules.length + 1);

@@ -110,7 +110,7 @@ describe('WorkingMemory', () => {
   test('reduce() collapses segment and maintains maxSlots length', () => {
     const mem = new WorkingMemory(8);
     mem.load([TOKEN.OR, TOKEN.V1, TOKEN.V0]);
-    mem.reduce(0, 2, TOKEN.V1);
+    mem.reduce(0, 2, 1);
     expect(mem.length).toBe(1);
     expect(mem.slots.length).toBe(8);
     expect(mem.slots[0]).toBe(TOKEN.V1);
@@ -121,9 +121,9 @@ describe('WorkingMemory', () => {
     const mem = new WorkingMemory(8);
     mem.load([TOKEN.NOT, TOKEN.V0]);
     expect(mem.isSolved()).toBe(false);
-    mem.reduce(0, 1, TOKEN.V1);
+    mem.reduce(0, 1, 1);
     expect(mem.isSolved()).toBe(true);
-    expect(mem.answer()).toBe(TOKEN.V1);
+    expect(mem.answer()).toBe(1);
   });
 
   test('isSolved() is false when multiple active slots remain', () => {
@@ -136,27 +136,30 @@ describe('WorkingMemory', () => {
     const mem = new WorkingMemory(16);
     mem.load([TOKEN.AND, TOKEN.V1, TOKEN.V0]);
     const vec = mem.toVector();
-    expect(vec.length).toBe(16 * VOCAB_SIZE);
+    expect(vec.length).toBe(16 * (VOCAB_SIZE + 1));
   });
 
   test('toVector() encodes AND at slot 0 as one-hot at TOKEN.AND=2', () => {
     const mem = new WorkingMemory(4);
     mem.load([TOKEN.AND, TOKEN.V1, TOKEN.V0]);
     const vec = mem.toVector();
+    const slotSize = VOCAB_SIZE + 1;
     // slot 0 → offset 0; TOKEN.AND = 2
     expect(vec[TOKEN.AND]).toBe(1);
     // other entries in slot-0's segment are 0
     for (let k = 0; k < VOCAB_SIZE; k++) {
       if (k !== TOKEN.AND) expect(vec[k]).toBe(0);
     }
+    expect(vec[slotSize - 1]).toBe(0);
   });
 
   test('toVector() encodes NULL slot as all-zeros', () => {
     const mem = new WorkingMemory(4);
     mem.load([TOKEN.V1]);           // only slot 0 active
     const vec = mem.toVector();
-    // slot 1 (NULL) → VOCAB_SIZE offset 1*VOCAB_SIZE .. (2*VOCAB_SIZE - 1) all 0
-    for (let k = VOCAB_SIZE; k < 2 * VOCAB_SIZE; k++) {
+    const slotSize = VOCAB_SIZE + 1;
+    // slot 1 (NULL) → offset 1*slotSize .. (2*slotSize - 1) all 0
+    for (let k = slotSize; k < 2 * slotSize; k++) {
       expect(vec[k]).toBe(0);
     }
   });
@@ -165,7 +168,7 @@ describe('WorkingMemory', () => {
     const mem = new WorkingMemory(8);
     mem.load([TOKEN.AND, TOKEN.V1, TOKEN.V0]);
     const copy = mem.clone();
-    copy.reduce(0, 2, TOKEN.V0);
+    copy.reduce(0, 2, 0);
     // original is unchanged
     expect(mem.length).toBe(3);
     expect(copy.length).toBe(1);
@@ -178,17 +181,17 @@ describe('WorkingMemory', () => {
     expect(mem.isSolved()).toBe(false);
 
     // Step 1: reduce OR at 1
-    mem.reduce(1, 2, TOKEN.V1);
+    mem.reduce(1, 2, 1);
     expect(mem.slots[1]).toBe(TOKEN.V1);
 
     // Step 2: reduce NOT at 2
-    mem.reduce(2, 1, TOKEN.V1);
+    mem.reduce(2, 1, 1);
     expect(mem.slots[2]).toBe(TOKEN.V1);
 
     // Step 3: reduce AND at 0
-    mem.reduce(0, 2, TOKEN.V1);
+    mem.reduce(0, 2, 1);
     expect(mem.isSolved()).toBe(true);
-    expect(mem.answer()).toBe(TOKEN.V1);
+    expect(mem.answer()).toBe(1);
   });
 });
 
@@ -274,7 +277,7 @@ describe('ReplayBuffer', () => {
 describe('DecompositionController', () => {
   test('constructor sets correct network architecture', () => {
     const ctrl = new DecompositionController({ maxSlots: 16, hiddenSize: 32 });
-    expect(ctrl.network.architecture[0]).toBe(16 * VOCAB_SIZE);
+    expect(ctrl.network.architecture[0]).toBe(16 * (VOCAB_SIZE + 1));
     expect(ctrl.network.architecture).toContain(32);
     expect(ctrl.network.architecture[ctrl.network.architecture.length - 1]).toBe(16);
   });
@@ -377,7 +380,7 @@ describe('computeExpertTrace', () => {
   test('each step has stateVec of correct length', () => {
     const { trace } = computeExpertTrace(DEPTH2_TOKENS, evalOp);
     for (const step of trace) {
-      expect(step.stateVec.length).toBe(16 * VOCAB_SIZE);
+      expect(step.stateVec.length).toBe(16 * (VOCAB_SIZE + 1));
     }
   });
 
@@ -401,8 +404,13 @@ describe('DecompositionCurriculum', () => {
     const c  = new DecompositionCurriculum();
     const ps = c.generateDepth1();
     for (const { tokens: toks, answer } of ps) {
-      const opTok = toks[0];
-      const args  = toks.slice(1);
+      const opTok = toks[0].token ?? toks[0];
+      const args = toks.slice(1).map(tok => {
+        if (tok && typeof tok === 'object') return tok.value;
+        if (tok === TOKEN.V0) return 0;
+        if (tok === TOKEN.V1) return 1;
+        return tok;
+      });
       expect(evalOp(opTok, args)).toBe(answer);
     }
   });

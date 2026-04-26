@@ -25,7 +25,8 @@ class SharedEmbeddingBank {
       const prototypes = Array.from({ length: this.prototypeCount }, () =>
         input.map(v => v + (Math.random() - 0.5) * 0.1)
       );
-      this._banks.set(inputSize, { prototypes });
+      const baseline = prototypes.map(row => [...row]);
+      this._banks.set(inputSize, { prototypes, baseline });
     }
     return this._banks.get(inputSize);
   }
@@ -67,6 +68,30 @@ class SharedEmbeddingBank {
       prototypeCount: this.prototypeCount,
       inputSizes:     sizes,
       bankCount:      sizes.length,
+      drift:          this.getDriftInfo(),
+    };
+  }
+
+  getDriftInfo() {
+    const perInputSize = {};
+    let total = 0;
+    let count = 0;
+    for (const [size, bank] of this._banks.entries()) {
+      if (!bank.baseline) continue;
+      const distances = bank.prototypes.map((proto, idx) =>
+        euclideanDistance(proto, bank.baseline[idx] || proto)
+      );
+      const avg = distances.reduce((a, b) => a + b, 0) / distances.length;
+      perInputSize[size] = {
+        average: avg,
+        max: Math.max(...distances),
+      };
+      total += avg;
+      count++;
+    }
+    return {
+      average: count ? total / count : 0,
+      perInputSize,
     };
   }
 
@@ -75,7 +100,13 @@ class SharedEmbeddingBank {
       embeddingSize:  this.embeddingSize,
       prototypeCount: this.prototypeCount,
       learningRate:   this.learningRate,
-      banks:          [...this._banks.entries()],
+      banks:          [...this._banks.entries()].map(([size, bank]) => [
+        size,
+        {
+          prototypes: bank.prototypes,
+          baseline: bank.baseline,
+        },
+      ]),
     };
   }
 
@@ -85,7 +116,10 @@ class SharedEmbeddingBank {
       prototypeCount: data.prototypeCount,
       learningRate:   data.learningRate,
     });
-    bank._banks = new Map(data.banks || []);
+    bank._banks = new Map((data.banks || []).map(([size, entry]) => [
+      size,
+      { prototypes: entry.prototypes, baseline: entry.baseline || entry.prototypes.map(row => [...row]) },
+    ]));
     return bank;
   }
 }

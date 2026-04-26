@@ -57,12 +57,14 @@ function computeExpertTrace(inputTokens, evalFn, maxSlots = 16) {
 
     const stateVec    = mem.toVector();
     const rawSlots    = [...mem.slots];          // full maxSlots-length raw token array
+    const rawValues   = [...mem.values];
     const validStarts = candidates.map(c => c.start);  // all valid positions at this state
     const result      = evalFn(action.op, action.args);
 
     trace.push({
       stateVec,
       rawSlots,
+      rawValues,
       validStarts,
       chosenStart: action.start,
       op:          action.op,

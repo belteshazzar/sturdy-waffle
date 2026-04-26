@@ -42,11 +42,13 @@ class DecompositionGraph {
     this._nextId     = 0;
 
     for (const tok of tokens) {
+      const tokenId = (tok && typeof tok === 'object') ? tok.token : tok;
+      const value = (tok && typeof tok === 'object') ? tok.value : null;
       this.nodes.push({
         id:       this._nextId++,
         type:     'input',
-        token:    tok,
-        value:    null,
+        token:    tokenId,
+        value,
         children: [],
       });
     }
@@ -92,7 +94,13 @@ class DecompositionGraph {
     return {
       nodeCount:   this.nodes.length,
       stepCount:   this.steps.length,
-      inputTokens: this.inputTokens.map(t => TOKEN_NAMES[t] ?? t),
+      inputTokens: this.inputTokens.map(t => {
+        if (t && typeof t === 'object') {
+          const name = TOKEN_NAMES[t.token] ?? t.token;
+          return t.value !== undefined ? `${name}(${t.value})` : name;
+        }
+        return TOKEN_NAMES[t] ?? t;
+      }),
       steps:       this.steps.map(s => ({
         stepNo: s.stepNo,
         op:     s.opName,

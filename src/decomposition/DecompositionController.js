@@ -93,7 +93,10 @@ class DecompositionController {
       ? new EmbeddingTable({ vocabSize: VOCAB_SIZE, dim: embeddingDim, learningRate })
       : null;
 
-    const inputSize  = embeddingDim ? maxSlots * embeddingDim : maxSlots * VOCAB_SIZE;
+    const valueDim   = 1;
+    const inputSize  = embeddingDim
+      ? maxSlots * (embeddingDim + valueDim)
+      : maxSlots * (VOCAB_SIZE + valueDim);
     const outputSize = maxSlots;
 
     this.network = new NeuralNetwork({
@@ -197,7 +200,8 @@ class DecompositionController {
    *
    * @param {Array<{
    *   stateVec?:    number[],
-   *   rawSlots?:    number[],
+    *   rawSlots?:    number[],
+    *   rawValues?:   number[],
    *   validStarts?: number[],
    *   targetStart:  number
    * }>} examples
@@ -234,7 +238,7 @@ class DecompositionController {
         if (ex.targetStart >= 0 && ex.targetStart < outputSize) {
           target[ex.targetStart] = 1;
         }
-        return { rawSlots: ex.rawSlots, stateVec: ex.stateVec, target };
+        return { rawSlots: ex.rawSlots, rawValues: ex.rawValues, stateVec: ex.stateVec, target };
       });
 
       for (let epoch = 0; epoch < epochs; epoch++) {
@@ -251,6 +255,7 @@ class DecompositionController {
             // Temporary WorkingMemory to use toVector(table)
             const tmpMem  = new WorkingMemory(this.config.maxSlots);
             tmpMem.slots  = ex.rawSlots;
+            if (ex.rawValues) tmpMem.values = ex.rawValues;
             input = tmpMem.toVector(this.embeddingTable);
           } else {
             input = ex.stateVec;
@@ -261,9 +266,11 @@ class DecompositionController {
           // Propagate gradient into embedding table (per slot)
           if (ex.rawSlots) {
             const dim = this.embeddingTable.dim;
+            const slotSize = dim + 1;
             for (let s = 0; s < this.config.maxSlots; s++) {
               const tok      = ex.rawSlots[s];
-              const gradSlice = inputGrad.slice(s * dim, (s + 1) * dim);
+              const start    = s * slotSize;
+              const gradSlice = inputGrad.slice(start, start + dim);
               this.embeddingTable.update(tok, gradSlice);
             }
           }

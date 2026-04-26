@@ -497,10 +497,17 @@ The Brain now supports opt-in mechanisms for few-shot learning, memory, and self
   semantic concepts and rule-based inferences.
 - **Active learning** — `brain.suggestLessons(lessons)` returns the most
   uncertain/novel samples to teach next.
+- **Expression parsing** — `brain.evaluateString()` and `brain.tokenizeExpression()` convert
+  raw strings into expression trees or token streams for decomposition.
+- **Sequence regions** — set `lesson.sequence = true` to train a recurrent region on
+  variable-length token streams.
+- **Relations & typed attributes** — `FactBase.assertRelation()` and
+  `FactBase.defineAttribute()` support multi-arity relations and numeric attributes.
 - **Evaluation suites** — `brain.baselineReport({ syllabi })` and
   `brain.evaluateSuite({ syllabi, expressions, transferPairs })`.
-- **World model** — `brain.observeTransition(state, nextState)` and
-  `brain.predictNextState(state)` for predictive coding experiments.
+- **World model** — `brain.observeTransition(state, nextState, { action, context })`,
+  `brain.predictNextState(state, { action, context })`, and `brain.planTrajectory()`
+  for predictive coding experiments.
 
 ---
 

@@ -10,12 +10,17 @@ class WorldModel {
     this.transitions = new Map(); // stateKey -> { count, sum, last }
   }
 
-  _key(state) {
-    return state.map(v => v.toFixed(4)).join('|');
+  _key(state, action, context) {
+    const stateKey = state.map(v => v.toFixed(4)).join('|');
+    const actionKey = action ? action.map(v => v.toFixed(4)).join('|') : '';
+    const contextKey = context ? context.map(v => v.toFixed(4)).join('|') : '';
+    return `${stateKey}::${actionKey}::${contextKey}`;
   }
 
-  observe(state, nextState) {
-    const key = this._key(state);
+  observe(state, nextState, opts = {}) {
+    const action = Array.isArray(opts) ? opts : opts.action;
+    const context = opts && !Array.isArray(opts) ? opts.context : null;
+    const key = this._key(state, action, context);
     if (!this.transitions.has(key)) {
       this.transitions.set(key, { count: 0, sum: new Array(nextState.length).fill(0), last: null });
     }
@@ -32,10 +37,26 @@ class WorldModel {
     }
   }
 
-  predict(state) {
-    const entry = this.transitions.get(this._key(state));
+  predict(state, opts = {}) {
+    const action = Array.isArray(opts) ? opts : opts.action;
+    const context = opts && !Array.isArray(opts) ? opts.context : null;
+    const entry = this.transitions.get(this._key(state, action, context));
     if (!entry || entry.count === 0) return null;
     return entry.sum.map(v => v / entry.count);
+  }
+
+  rollout(initialState, { actions = [], context = null, steps = null } = {}) {
+    const horizon = steps ?? actions.length;
+    const states = [];
+    let current = [...initialState];
+    for (let i = 0; i < horizon; i++) {
+      const action = actions[i] || null;
+      const next = this.predict(current, { action, context });
+      if (!next) break;
+      states.push(next);
+      current = next;
+    }
+    return states;
   }
 
   getInfo() {

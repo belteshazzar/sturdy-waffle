@@ -139,7 +139,7 @@ describe('WorkingMemory.toVector(embeddingTable)', () => {
     const mem = new WorkingMemory(8);
     mem.load([TOKEN.AND, TOKEN.V1, TOKEN.V0]);
     const vec = mem.toVector();
-    expect(vec.length).toBe(8 * VOCAB_SIZE);
+    expect(vec.length).toBe(8 * (VOCAB_SIZE + 1));
   });
 
   test('with embeddingTable returns flat vector of length maxSlots*dim', () => {
@@ -147,7 +147,7 @@ describe('WorkingMemory.toVector(embeddingTable)', () => {
     const table = new EmbeddingTable({ vocabSize: VOCAB_SIZE, dim: EMBED_DIM });
     mem.load([TOKEN.AND, TOKEN.V1, TOKEN.V0]);
     const vec = mem.toVector(table);
-    expect(vec.length).toBe(8 * EMBED_DIM);
+    expect(vec.length).toBe(8 * (EMBED_DIM + 1));
   });
 
   test('embedded vector for NULL slot is all-zeros', () => {
@@ -156,9 +156,10 @@ describe('WorkingMemory.toVector(embeddingTable)', () => {
     mem.load([TOKEN.V1]);   // slots 1-3 are NULL
     const vec = mem.toVector(table);
     // Slots 1-3: all zeros
+    const slotSize = EMBED_DIM + 1;
     for (let s = 1; s < 4; s++) {
-      for (let k = 0; k < EMBED_DIM; k++) {
-        expect(vec[s * EMBED_DIM + k]).toBe(0);
+      for (let k = 0; k < slotSize; k++) {
+        expect(vec[s * slotSize + k]).toBe(0);
       }
     }
   });
@@ -172,6 +173,7 @@ describe('WorkingMemory.toVector(embeddingTable)', () => {
     for (let k = 0; k < EMBED_DIM; k++) {
       expect(vec[k]).toBeCloseTo(emb[k], 10);
     }
+    expect(vec[EMBED_DIM]).toBe(0);
   });
 });
 
@@ -232,7 +234,7 @@ describe('DecompositionController — embedding mode', () => {
 
   test('policy network input size = maxSlots * embeddingDim', () => {
     const ctrl = new DecompositionController({ maxSlots: 8, embeddingDim: EMBED_DIM });
-    expect(ctrl.network.architecture[0]).toBe(8 * EMBED_DIM);
+    expect(ctrl.network.architecture[0]).toBe(8 * (EMBED_DIM + 1));
   });
 
   test('embeddingTable is null in one-hot mode', () => {

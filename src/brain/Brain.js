@@ -2,6 +2,7 @@
 
 const { EventEmitter } = require('events');
 const BrainRegion      = require('./BrainRegion');
+const SequenceBrainRegion = require('./SequenceBrainRegion');
 const Router           = require('../routing/Router');
 const FactBase         = require('../knowledge/FactBase');
 const MemorySystem     = require('../memory/MemorySystem');
@@ -9,6 +10,7 @@ const SharedEmbeddingBank = require('./SharedEmbeddingBank');
 const MetaLearner      = require('./MetaLearner');
 const SelfSupervisedLearner = require('../learning/SelfSupervisedLearner');
 const WorldModel       = require('../world/WorldModel');
+const ExpressionParser = require('../parsing/ExpressionParser');
 
 // Decomposition modules (loaded lazily to avoid circular deps at startup)
 const {
@@ -212,7 +214,8 @@ class Brain extends EventEmitter {
       regressionTolerance: this.config.regressionTolerance,
     };
 
-    const region = new BrainRegion({
+    const RegionClass = lesson.sequence ? SequenceBrainRegion : BrainRegion;
+    const region = new RegionClass({
       domain: lesson.domain,
       lesson,
       config: regionConfig,
@@ -270,7 +273,7 @@ class Brain extends EventEmitter {
 
     this._updateKnowledgeTree(domain);
     this.memory.recordLesson(lesson);
-    if (this.metaLearner) {
+    if (this.metaLearner && region.network && region.network.layers) {
       this.metaLearner.registerRegion(region);
     }
 
@@ -433,6 +436,25 @@ class Brain extends EventEmitter {
       return this.queryFact(subject, predicate);
     }
 
+    // ── Relation lookup node ────────────────────────────────────────────────
+    if (expression.relation !== undefined) {
+      if (!this.factBase) {
+        throw new Error(
+          'Expression contains a relation node but no FactBase is loaded. ' +
+          'Call brain.learnFacts(factBase) first.'
+        );
+      }
+      const { name, args, infer } = expression.relation;
+      if (infer) {
+        const inferred = this.inferRelation(name, args);
+        if (inferred.value === null) {
+          throw new Error(`Unable to infer relation '${name}(${args.join(',')})'.`);
+        }
+        return inferred.value;
+      }
+      return this.queryRelation(name, args);
+    }
+
     if (expression.value !== undefined) {
       return expression.value;
     }
@@ -459,6 +481,42 @@ class Brain extends EventEmitter {
       return region.predict(evaluatedInputs)[0];
     }
     return region.predictBinary(evaluatedInputs)[0];
+  }
+
+  /**
+   * Parse a human-readable expression string to a structured tree.
+   */
+  parseExpression(exprString) {
+    return ExpressionParser.parseExpression(exprString);
+  }
+
+  /**
+   * Evaluate a raw expression string using the standard evaluate() pathway.
+   */
+  evaluateString(exprString) {
+    return this.evaluate(this.parseExpression(exprString));
+  }
+
+  /**
+   * Convert an expression string to a decomposition-ready token stream.
+   */
+  tokenizeExpression(exprString, { resolveFacts = false } = {}) {
+    const factResolver = resolveFacts
+      ? node => {
+        if (node.subject) {
+          return node.infer
+            ? this.inferFact(node.subject, node.predicate).value
+            : this.queryFact(node.subject, node.predicate);
+        }
+        if (node.name) {
+          return node.infer
+            ? this.inferRelation(node.name, node.args).value
+            : this.queryRelation(node.name, node.args);
+        }
+        return null;
+      }
+      : null;
+    return ExpressionParser.toTokenStream(exprString, { factResolver });
   }
 
   // ── Knowledge checks ──────────────────────────────────────────────────────
@@ -547,8 +605,9 @@ class Brain extends EventEmitter {
       );
     }
 
+    const definition = this.factBase.getAttributeDefinition(attribute);
     const vocab = this.factBase.getAttributeVocabulary(attribute);
-    if (!vocab) {
+    if (!vocab && (!definition || definition.type !== 'numeric')) {
       throw new Error(
         `Attribute '${attribute}' is not defined in the loaded FactBase.`
       );
@@ -561,8 +620,29 @@ class Brain extends EventEmitter {
       throw new Error(`No brain region found for domain '${domain}'.`);
     }
 
+    if (definition && definition.type === 'numeric') {
+      return region.predict([encoded])[0];
+    }
     const argmax = region.predictArgmax([encoded]);
     return vocab[argmax];
+  }
+
+  /**
+   * Query a multi-arity relation by name and argument list.
+   *
+   * @param {string} relation
+   * @param {string[]} args
+   * @returns {0|1}
+   */
+  queryRelation(relation, args) {
+    if (!this.factBase) {
+      throw new Error('No FactBase is loaded. Call brain.learnFacts(factBase) first.');
+    }
+    const value = this.factBase.getRelation(relation, args);
+    if (value === null) {
+      throw new Error(`No relation '${relation}' found for args [${args.join(', ')}].`);
+    }
+    return value;
   }
 
   // ── Reasoning & discovery ──────────────────────────────────────────────────
@@ -594,6 +674,26 @@ class Brain extends EventEmitter {
   }
 
   /**
+   * Infer a relation using semantic rules or analogies when explicit facts are missing.
+   */
+  inferRelation(relation, args) {
+    if (!this.factBase) {
+      throw new Error('No FactBase is loaded. Call brain.learnFacts(factBase) first.');
+    }
+    const explicit = this.factBase.getRelation(relation, args);
+    if (explicit !== null) {
+      return { value: explicit, confidence: 1, source: 'factBase' };
+    }
+    const ruleInference = this.memory.semantic.inferRelationFromRules({
+      relation,
+      args,
+      factBase: this.factBase,
+    });
+    if (ruleInference) return ruleInference;
+    return { value: null, confidence: 0, source: 'unknown' };
+  }
+
+  /**
    * Suggest informative training samples based on uncertainty + novelty.
    */
   suggestLessons(lessons, { limit = 5 } = {}) {
@@ -620,6 +720,49 @@ class Brain extends EventEmitter {
     return scored.slice(0, limit);
   }
 
+  /**
+   * Generate new lessons from episodic memory using uncertainty/novelty scores.
+   */
+  generateActiveLessons({ domains, limitPerDomain = 12, minScore = 0.4 } = {}) {
+    const Lesson = require('../learning/Lesson');
+    const episodes = this.memory.episodic.episodes;
+    const domainSet = domains ? new Set(domains) : null;
+    const grouped = new Map();
+    episodes.forEach(ep => {
+      if (domainSet && !domainSet.has(ep.domain)) return;
+      if (!grouped.has(ep.domain)) grouped.set(ep.domain, []);
+      grouped.get(ep.domain).push(ep);
+    });
+
+    const lessons = [];
+    for (const [domain, eps] of grouped.entries()) {
+      const scored = eps.map(ep => {
+        const uncertainty = this._estimateUncertainty(domain, ep.input);
+        const novelty = this._estimateNovelty(domain, ep.input);
+        const score = this.config.activeLearning.uncertaintyWeight * uncertainty +
+          this.config.activeLearning.noveltyWeight * novelty;
+        return { ep, score };
+      }).filter(entry => entry.score >= minScore);
+      scored.sort((a, b) => b.score - a.score);
+      const selected = scored.slice(0, limitPerDomain).map(entry => entry.ep);
+      if (selected.length === 0) continue;
+      const region = this.router.route(domain);
+      const mode = region?.lesson?.mode || 'classification';
+      lessons.push(new Lesson({
+        name: `Auto Curriculum: ${domain}`,
+        domain,
+        description: 'Auto-generated lesson from episodic memory.',
+        trainingData: selected.map(ep => ({ input: ep.input, output: ep.output })),
+        inputSize: selected[0].input.length,
+        outputSize: selected[0].output.length,
+        mode,
+        tags: ['auto', 'active-learning'],
+        sequence: region?.lesson?.sequence || false,
+      }));
+    }
+    return lessons;
+  }
+
   _estimateUncertainty(domain, input, mode = 'classification') {
     const region = this.router.route(domain);
     if (!region) return 1;
@@ -638,8 +781,11 @@ class Brain extends EventEmitter {
   _estimateNovelty(domain, input) {
     const nearest = this.memory.episodic.query({ domain, input, limit: 1 });
     if (!nearest.length) return 1;
-    const length = input.length || 1;
-    const distance = nearest[0].input.reduce((acc, v, i) => acc + Math.abs(v - input[i]), 0);
+    const flatten = value => (Array.isArray(value) ? value.flat(Infinity) : [value]);
+    const flatInput = flatten(input);
+    const flatNearest = flatten(nearest[0].input);
+    const length = Math.max(1, flatInput.length);
+    const distance = flatNearest.reduce((acc, v, i) => acc + Math.abs(v - (flatInput[i] || 0)), 0);
     return Math.min(1, distance / length);
   }
 
@@ -758,7 +904,10 @@ class Brain extends EventEmitter {
             // the deterministic truth table (supplied by the curriculum).
             const domain = this.resolveTokenDomain(opTok);
             if (domain && this.router.hasRoute(domain)) {
-              return this.predictBinary(args, domain)[0];
+              const region = this.router.route(domain);
+              return (region.lesson && region.lesson.mode === 'regression')
+                ? region.predict(args)[0]
+                : region.predictBinary(args)[0];
             }
             return curriculum.evalOp
               ? curriculum.evalOp(opTok, args)
@@ -769,6 +918,7 @@ class Brain extends EventEmitter {
           allExamples.push({
             stateVec:    step.stateVec,
             rawSlots:    step.rawSlots,
+            rawValues:   step.rawValues,
             validStarts: step.validStarts,
             targetStart: step.chosenStart,
           });
@@ -788,14 +938,15 @@ class Brain extends EventEmitter {
       const routerExamples = [];
       for (const stage of stages) {
         for (const problem of stage.problems) {
-          for (const tok of problem.tokens) {
-            const domain = this.resolveTokenDomain(tok);
-            if (!domain) continue;
-            const domainIdx = this.learnedRouter.domains.indexOf(domain);
-            if (domainIdx < 0) continue;
-            const opEmb = this.controller.embeddingTable.lookup(tok);
-            routerExamples.push({ opEmbedding: opEmb, domainIndex: domainIdx });
-          }
+            for (const tok of problem.tokens) {
+              const tokenId = (tok && typeof tok === 'object') ? tok.token : tok;
+              const domain = this.resolveTokenDomain(tokenId);
+              if (!domain) continue;
+              const domainIdx = this.learnedRouter.domains.indexOf(domain);
+              if (domainIdx < 0) continue;
+              const opEmb = this.controller.embeddingTable.lookup(tokenId);
+              routerExamples.push({ opEmbedding: opEmb, domainIndex: domainIdx });
+            }
         }
       }
       if (routerExamples.length > 0) {
@@ -897,11 +1048,15 @@ class Brain extends EventEmitter {
         );
       }
 
-      const result = this.predictBinary(action.args, domain)[0];
+      const region = this.router.route(domain);
+      const result = (region.lesson && region.lesson.mode === 'regression')
+        ? region.predict(action.args)[0]
+        : region.predictBinary(action.args)[0];
 
       trace.push({
         stateVec:    mem.toVector(this.controller.embeddingTable || null),
         rawSlots:    [...mem.slots],
+        rawValues:   [...mem.values],
         chosenStart: action.start,
         op:          action.op,
         args:        [...action.args],
@@ -918,6 +1073,7 @@ class Brain extends EventEmitter {
         args:   action.args,
         result,
         memory: mem.slots.slice(0, mem.length),
+        values: mem.values.slice(0, mem.length),
       });
     }
 
@@ -965,7 +1121,10 @@ class Brain extends EventEmitter {
         const tokenIds = problem.tokens;
         const n        = Math.min(words.length, tokenIds.length);
         for (let i = 0; i < n; i++) {
-          examples.push({ word: words[i], tokenId: tokenIds[i] });
+          const token = tokenIds[i] && typeof tokenIds[i] === 'object'
+            ? tokenIds[i].token
+            : tokenIds[i];
+          examples.push({ word: words[i], tokenId: token });
         }
       }
     }
@@ -988,9 +1147,28 @@ class Brain extends EventEmitter {
   solveString(exprString, opts = {}) {
     let tokenIds;
     if (this.stringEncoder) {
-      tokenIds = this.stringEncoder.encode(exprString);
-    } else {
-      tokenIds = StringEncoder.toTokenIds(exprString);
+      try {
+        tokenIds = this.stringEncoder.encode(exprString);
+      } catch (err) {
+        tokenIds = null;
+      }
+    }
+    if (!tokenIds) {
+      tokenIds = ExpressionParser.toTokenStream(exprString, {
+        factResolver: node => {
+          if (node.subject) {
+            return node.infer
+              ? this.inferFact(node.subject, node.predicate).value
+              : this.queryFact(node.subject, node.predicate);
+          }
+          if (node.name) {
+            return node.infer
+              ? this.inferRelation(node.name, node.args).value
+              : this.queryRelation(node.name, node.args);
+          }
+          return null;
+        },
+      });
     }
     return this.solve(tokenIds, opts);
   }
@@ -1019,6 +1197,64 @@ class Brain extends EventEmitter {
       episodes: episodes.length,
       selfSupervised: selfSupervisedResult,
       worldModelUpdated: !!this.worldModel,
+    };
+  }
+
+  /**
+   * Pretrain shared embeddings and a sequence predictor from unlabeled token streams.
+   */
+  pretrainTokenModels({ tokenStreams = [], epochs = 40, window = 3 } = {}) {
+    const Lesson = require('../learning/Lesson');
+    const { VOCAB_SIZE } = decompTokens;
+    const oneHot = (idx) => {
+      const vec = new Array(VOCAB_SIZE).fill(0);
+      if (idx >= 0 && idx < VOCAB_SIZE) vec[idx] = 1;
+      return vec;
+    };
+
+    const autoEpisodes = [];
+    const sequenceSamples = [];
+    tokenStreams.forEach(stream => {
+      for (let i = 0; i < stream.length; i++) {
+        const tokenId = stream[i];
+        autoEpisodes.push({ input: oneHot(tokenId) });
+        if (i >= window) {
+          const windowSlice = stream.slice(i - window, i);
+          const input = windowSlice.map(tok => [tok / Math.max(1, VOCAB_SIZE - 1)]);
+          const output = oneHot(tokenId);
+          sequenceSamples.push({ input, output });
+        }
+      }
+    });
+
+    let autoResult = null;
+    if (this.selfSupervisedLearner && autoEpisodes.length > 0) {
+      autoResult = this.selfSupervisedLearner.trainFromEpisodes(autoEpisodes, { epochs });
+    }
+    if (this.sharedEmbedding && autoEpisodes.length > 0) {
+      this.sharedEmbedding.updateWithSamples(autoEpisodes);
+    }
+
+    let sequenceResult = null;
+    if (sequenceSamples.length > 0) {
+      const lesson = new Lesson({
+        name: 'Token Next Prediction',
+        domain: 'sequence.NEXT_TOKEN',
+        description: 'Predict the next token from a short history window.',
+        trainingData: sequenceSamples,
+        inputSize: 1,
+        outputSize: VOCAB_SIZE,
+        mode: 'multiclass',
+        sequence: true,
+        tags: ['self-supervised', 'sequence'],
+      });
+      sequenceResult = this.learn(lesson);
+    }
+
+    return {
+      autoencoder: autoResult,
+      sequencePredictor: sequenceResult,
+      samples: sequenceSamples.length,
     };
   }
 
@@ -1057,15 +1293,20 @@ class Brain extends EventEmitter {
     return { concepts, rules, facts: inferredFacts };
   }
 
-  observeTransition(state, nextState) {
+  observeTransition(state, nextState, opts = {}) {
     if (!this.worldModel) return { observed: false };
-    this.worldModel.observe(state, nextState);
+    this.worldModel.observe(state, nextState, opts);
     return { observed: true };
   }
 
-  predictNextState(state) {
+  predictNextState(state, opts = {}) {
     if (!this.worldModel) return null;
-    return this.worldModel.predict(state);
+    return this.worldModel.predict(state, opts);
+  }
+
+  planTrajectory(state, { actions = [], context = null, steps = null } = {}) {
+    if (!this.worldModel) return [];
+    return this.worldModel.rollout(state, { actions, context, steps });
   }
 
   baselineReport({ syllabi = [], shots = 4 } = {}) {
@@ -1084,6 +1325,30 @@ class Brain extends EventEmitter {
       brainFactory: () => new Brain(this.config),
     });
     return suite.runAll({ syllabi, expressions, transferPairs, factBase, shots });
+  }
+
+  // ── Diagnostics ──────────────────────────────────────────────────────────
+
+  getDiagnostics() {
+    const routingConfidence = [];
+    if (this.learnedRouter && this.controller && this.controller.embeddingTable) {
+      for (const opTok of decompTokens.OPERATIONS) {
+        const embedding = this.controller.embeddingTable.lookup(opTok);
+        const routed = this.learnedRouter.route(embedding);
+        routingConfidence.push({
+          token: opTok,
+          op: decompTokens.TOKEN_NAMES[opTok] || String(opTok),
+          domain: routed.domain,
+          confidence: routed.confidence,
+          aboveThreshold: routed.aboveThreshold,
+        });
+      }
+    }
+    return {
+      routingConfidence,
+      embeddingDrift: this.sharedEmbedding ? this.sharedEmbedding.getDriftInfo() : null,
+      consolidation: this.memory ? this.memory.lastConsolidation : null,
+    };
   }
 
   _updateKnowledgeTree(domain) {
@@ -1141,6 +1406,7 @@ class Brain extends EventEmitter {
       selfSupervised:   this.selfSupervisedLearner ? this.selfSupervisedLearner.getInfo() : null,
       worldModel:       this.worldModel ? this.worldModel.getInfo() : null,
       memory:           this.memory.getInfo(),
+      diagnostics:      this.getDiagnostics(),
       capabilityGaps: Object.fromEntries(
         Object.entries(regions).map(([domain, info]) => [
           domain,
@@ -1152,9 +1418,11 @@ class Brain extends EventEmitter {
         subjectCount:   this.factBase.subjects.length,
         predicateCount: this.factBase.predicates.length,
         attributeCount: this.factBase.attributes.length,
+        relationCount:  this.factBase.relations.length,
         subjects:       [...this.factBase.subjects],
         predicates:     this.factBase.predicates,
         attributes:     this.factBase.attributes,
+        relations:      this.factBase.relations,
       } : null,
     };
   }
@@ -1215,9 +1483,9 @@ class Brain extends EventEmitter {
     }
 
     for (const { domain, region: regionData } of (data.regions || [])) {
-      const region = BrainRegion.fromJSON(regionData, {
-        sharedEmbedding: brain.sharedEmbedding,
-      });
+      const region = regionData.type === 'sequence'
+        ? SequenceBrainRegion.fromJSON(regionData)
+        : BrainRegion.fromJSON(regionData, { sharedEmbedding: brain.sharedEmbedding });
       brain.regions.set(domain, region);
       brain.router.register(domain, region);
     }
@@ -1262,13 +1530,19 @@ class Brain extends EventEmitter {
 function _fallbackEvalOp(opTok, args) {
   const { TOKEN } = decompTokens;
   switch (opTok) {
-    case TOKEN.AND:  return args[0] & args[1];
-    case TOKEN.OR:   return args[0] | args[1];
-    case TOKEN.NOT:  return args[0] === 0 ? 1 : 0;
-    case TOKEN.XOR:  return args[0] ^ args[1];
-    case TOKEN.NAND: return (args[0] & args[1]) === 0 ? 1 : 0;
-    case TOKEN.NOR:  return (args[0] | args[1]) === 0 ? 1 : 0;
-    case TOKEN.XNOR: return (args[0] ^ args[1]) === 0 ? 1 : 0;
+    case TOKEN.AND:  return Math.min(args[0], args[1]);
+    case TOKEN.OR:   return Math.max(args[0], args[1]);
+    case TOKEN.NOT:  return 1 - args[0];
+    case TOKEN.XOR:  return Math.abs(args[0] - args[1]);
+    case TOKEN.NAND: return 1 - Math.min(args[0], args[1]);
+    case TOKEN.NOR:  return 1 - Math.max(args[0], args[1]);
+    case TOKEN.XNOR: return 1 - Math.abs(args[0] - args[1]);
+    case TOKEN.IMP:  return Math.max(1 - args[0], args[1]);
+    case TOKEN.ADD:  return args[0] + args[1];
+    case TOKEN.SUB:  return args[0] - args[1];
+    case TOKEN.MUL:  return args[0] * args[1];
+    case TOKEN.DIV:  return args[1] === 0 ? 0 : args[0] / args[1];
+    case TOKEN.SQRT: return Math.sqrt(Math.max(0, args[0]));
     default: throw new Error(`_fallbackEvalOp: unknown token ${opTok}`);
   }
 }

@@ -63,6 +63,8 @@ class FactBase {
     // Multi-class / categorical attributes
     this._attributeVocab = Object.create(null);  // attribute → string[] (ordered values)
     this._attributeFacts = Object.create(null);  // `${subject}:${attribute}` → string
+    this._attributeTypes = Object.create(null);  // attribute → { type, range?, values? }
+    this._relations = Object.create(null);       // relation → { arity, facts: { key: 0|1 } }
   }
 
   // ── Fact management ───────────────────────────────────────────────────────
@@ -122,7 +124,17 @@ class FactBase {
   assertValue(subject, attribute, value) {
     if (typeof subject   !== 'string' || subject   === '') throw new Error('subject must be a non-empty string');
     if (typeof attribute !== 'string' || attribute === '') throw new Error('attribute must be a non-empty string');
-    if (typeof value     !== 'string' || value     === '') throw new Error('value must be a non-empty string');
+    const type = this._attributeTypes[attribute]?.type || 'categorical';
+    if (type === 'categorical') {
+      if (typeof value !== 'string' || value === '') {
+        throw new Error('value must be a non-empty string');
+      }
+    }
+    if (type === 'numeric') {
+      if (typeof value !== 'number' || Number.isNaN(value)) {
+        throw new Error('value must be a valid number');
+      }
+    }
     if (this._predicates.includes(attribute)) {
       throw new Error(
         `'${attribute}' is already defined as a binary predicate. ` +
@@ -133,14 +145,39 @@ class FactBase {
     if (!this.subjects.includes(subject)) {
       this.subjects.push(subject);
     }
-    if (!Object.prototype.hasOwnProperty.call(this._attributeVocab, attribute)) {
-      this._attributeVocab[attribute] = [];
+    if (type === 'categorical') {
+      if (!Object.prototype.hasOwnProperty.call(this._attributeVocab, attribute)) {
+        this._attributeVocab[attribute] = [];
+      }
+      if (!this._attributeVocab[attribute].includes(value)) {
+        this._attributeVocab[attribute].push(value);
+      }
+      this._attributeFacts[`${subject}:${attribute}`] = value;
+    } else {
+      this._attributeFacts[`${subject}:${attribute}`] = value;
+      const existing = this._attributeTypes[attribute];
+      if (existing && existing.type === 'numeric') {
+        const range = existing.range || [value, value];
+        range[0] = Math.min(range[0], value);
+        range[1] = Math.max(range[1], value);
+        this._attributeTypes[attribute] = { ...existing, range };
+      }
     }
-    if (!this._attributeVocab[attribute].includes(value)) {
-      this._attributeVocab[attribute].push(value);
-    }
+    return this;
+  }
 
-    this._attributeFacts[`${subject}:${attribute}`] = value;
+  /**
+   * Define an attribute's data type.
+   * @param {string} attribute
+   * @param {{ type: 'categorical'|'numeric'|'boolean', values?: string[], range?: number[] }} opts
+   */
+  defineAttribute(attribute, opts = {}) {
+    if (!attribute) throw new Error('attribute must be provided');
+    const type = opts.type || 'categorical';
+    this._attributeTypes[attribute] = { type, values: opts.values, range: opts.range };
+    if (type === 'categorical' && opts.values) {
+      this._attributeVocab[attribute] = [...opts.values];
+    }
     return this;
   }
 
@@ -171,6 +208,58 @@ class FactBase {
     return Object.prototype.hasOwnProperty.call(this._attributeVocab, attribute)
       ? [...this._attributeVocab[attribute]]
       : null;
+  }
+
+  getAttributeDefinition(attribute) {
+    return this._attributeTypes[attribute] ? { ...this._attributeTypes[attribute] } : null;
+  }
+
+  // ── Relations ─────────────────────────────────────────────────────────────
+
+  assertRelation(relation, args, value = true) {
+    if (typeof relation !== 'string' || relation === '') throw new Error('relation must be a non-empty string');
+    if (!Array.isArray(args) || args.length === 0) throw new Error('relation args must be a non-empty array');
+    args.forEach(arg => {
+      if (typeof arg !== 'string' || arg === '') throw new Error('relation args must be non-empty strings');
+      if (!this.subjects.includes(arg)) this.subjects.push(arg);
+    });
+    if (!this._relations[relation]) {
+      this._relations[relation] = { arity: args.length, facts: Object.create(null) };
+    }
+    if (this._relations[relation].arity !== args.length) {
+      throw new Error(`Relation '${relation}' expects arity ${this._relations[relation].arity}`);
+    }
+    const key = args.join('|');
+    this._relations[relation].facts[key] = value ? 1 : 0;
+    return this;
+  }
+
+  getRelation(relation, args) {
+    const entry = this._relations[relation];
+    if (!entry) return null;
+    const key = args.join('|');
+    return Object.prototype.hasOwnProperty.call(entry.facts, key) ? entry.facts[key] : null;
+  }
+
+  hasRelation(relation, args) {
+    const entry = this._relations[relation];
+    if (!entry) return false;
+    const key = args.join('|');
+    return Object.prototype.hasOwnProperty.call(entry.facts, key);
+  }
+
+  get relations() {
+    return Object.keys(this._relations);
+  }
+
+  getRelationFacts() {
+    const facts = [];
+    for (const [relation, entry] of Object.entries(this._relations)) {
+      for (const [key, value] of Object.entries(entry.facts)) {
+        facts.push({ relation, args: key.split('|'), value });
+      }
+    }
+    return facts;
   }
 
   /**
@@ -272,15 +361,20 @@ class FactBase {
     // Each attribute produces one lesson whose output is a one-hot vector over
     // the attribute's value vocabulary.  Subjects with no asserted value for the
     // attribute receive an all-zeros output vector.
-    const attributeLessons = Object.entries(this._attributeVocab).map(([attribute, vocab]) => {
-      const trainingData = this.subjects.map(subject => {
-        const value  = this.getValue(subject, attribute);
-        const output = vocab.map(v => (v === value ? 1 : 0));
-        return {
-          input:  [this.encodeSubject(subject)],
-          output,
-        };
-      });
+    const attributeLessons = Object.entries(this._attributeFacts).length === 0
+      ? []
+      : Object.entries(this._attributeVocab).map(([attribute, vocab]) => {
+        if (!vocab || vocab.length === 0) return null;
+        const definition = this._attributeTypes[attribute] || { type: 'categorical' };
+        if (definition.type !== 'categorical') return null;
+        const trainingData = this.subjects.map(subject => {
+          const value  = this.getValue(subject, attribute);
+          const output = vocab.map(v => (v === value ? 1 : 0));
+          return {
+            input:  [this.encodeSubject(subject)],
+            output,
+          };
+        });
 
       return new Lesson({
         name:        `Attribute: ${attribute}`,
@@ -291,9 +385,64 @@ class FactBase {
         outputSize:  vocab.length,
         mode:        'multiclass',
       });
+      }).filter(Boolean);
+
+    const numericAttributeLessons = Object.entries(this._attributeFacts).length === 0
+      ? []
+      : Object.entries(this._attributeTypes)
+        .filter(([, def]) => def.type === 'numeric')
+        .map(([attribute, def]) => {
+          const trainingData = this.subjects.map(subject => ({
+            input: [this.encodeSubject(subject)],
+            output: [this.getValue(subject, attribute) ?? 0],
+          }));
+          return new Lesson({
+            name:        `Attribute: ${attribute}`,
+            domain:      `facts.${attribute}`,
+            description: `Learn numeric attribute '${attribute}'.`,
+            trainingData,
+            inputSize:   1,
+            outputSize:  1,
+            mode:        'regression',
+            normalise:   def.range ? { outputRange: def.range } : null,
+          });
+        });
+
+    const relationLessons = Object.entries(this._relations).map(([relation, rel]) => {
+      const entities = [...this.subjects];
+      const combos = this._relationCombinations(entities, rel.arity, 250);
+      const trainingData = combos.map(args => ({
+        input: args.map(arg => this.encodeSubject(arg)),
+        output: [this.getRelation(relation, args) ?? 0],
+      }));
+      return new Lesson({
+        name:        `Relation: ${relation}`,
+        domain:      `facts.${relation}`,
+        description: `Learn relation '${relation}' with arity ${rel.arity}.`,
+        trainingData,
+        inputSize:   rel.arity,
+        mode:        'classification',
+      });
     });
 
-    return [...binaryLessons, ...attributeLessons];
+    return [...binaryLessons, ...attributeLessons, ...numericAttributeLessons, ...relationLessons];
+  }
+
+  _relationCombinations(items, arity, limit = 500) {
+    const results = [];
+    const build = (prefix) => {
+      if (results.length >= limit) return;
+      if (prefix.length === arity) {
+        results.push(prefix);
+        return;
+      }
+      for (const item of items) {
+        build([...prefix, item]);
+        if (results.length >= limit) return;
+      }
+    };
+    build([]);
+    return results;
   }
 
   // ── Accessors ─────────────────────────────────────────────────────────────
@@ -305,7 +454,10 @@ class FactBase {
 
   /** Ordered list of categorical attribute names. */
   get attributes() {
-    return Object.keys(this._attributeVocab);
+    return [...new Set([
+      ...Object.keys(this._attributeVocab),
+      ...Object.keys(this._attributeTypes),
+    ])];
   }
 
   /** Total number of asserted facts (subject × predicate pairs). */
@@ -330,6 +482,11 @@ class FactBase {
         Object.entries(this._attributeVocab).map(([k, v]) => [k, [...v]])
       ),
       attributeFacts: { ...this._attributeFacts },
+      attributeTypes: Object.fromEntries(Object.entries(this._attributeTypes).map(([k, v]) => [k, { ...v }])),
+      relations: Object.fromEntries(Object.entries(this._relations).map(([k, v]) => [
+        k,
+        { arity: v.arity, facts: { ...v.facts } },
+      ])),
     };
   }
 
@@ -346,6 +503,16 @@ class FactBase {
     }
     if (data.attributeFacts) {
       Object.assign(fb._attributeFacts, data.attributeFacts);
+    }
+    if (data.attributeTypes) {
+      for (const [attr, def] of Object.entries(data.attributeTypes)) {
+        fb._attributeTypes[attr] = { ...def };
+      }
+    }
+    if (data.relations) {
+      for (const [rel, info] of Object.entries(data.relations)) {
+        fb._relations[rel] = { arity: info.arity, facts: { ...info.facts } };
+      }
     }
     return fb;
   }

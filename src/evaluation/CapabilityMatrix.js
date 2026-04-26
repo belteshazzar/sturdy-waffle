@@ -13,7 +13,7 @@ const MODULE_CAPABILITIES = Object.freeze({
   brain:         ['representation', 'reasoning', 'learning', 'planning'],
   decomposition: ['reasoning', 'planning'],
   memory:        ['memory'],
-  worldModel:    ['planning'],
+  worldModel:    ['planning', 'representation'],
   parsing:       ['perception'],
 });
 

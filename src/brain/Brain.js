@@ -1690,7 +1690,7 @@ class Brain extends EventEmitter {
     return report;
   }
 
-  planActObserve({ input, maxSteps, exploreWeight, predictionWeight } = {}) {
+  planActObserve({ input, maxSteps, exploreWeight, predictionErrorWeight } = {}) {
     const normalized = this.normalizeInput(input, { mode: 'solve' });
     const tokens = normalized.kind === 'tokens'
       ? normalized.tokens
@@ -1711,7 +1711,7 @@ class Brain extends EventEmitter {
     let steps = 0;
     const budget = maxSteps ?? this.config.planning.maxSteps;
     const explore = exploreWeight ?? this.config.planning.exploreWeight;
-    const resolvedPredictionWeight = predictionWeight ?? this.config.planning.predictionWeight;
+    const resolvedPredictionWeight = predictionErrorWeight ?? this.config.planning.predictionWeight;
 
     while (!mem.isSolved() && steps < budget) {
       const candidates = mem.validReductions();
@@ -1739,13 +1739,15 @@ class Brain extends EventEmitter {
         if (this.worldModel && stateVec) {
           const predicted = this.worldModel.predict(stateVec, { action: actionVec });
           if (predicted) {
-            predictionError = this._predictionError(predicted, nextVec);
+            const computed = this._predictionError(predicted, nextVec);
+            if (computed !== null) predictionError = computed;
           }
         }
 
         const solvedBonus = simulated.isSolved() ? 1 : 0;
         const novelty = this._estimateNovelty('decomposition.step', actionVec);
-        const score = solvedBonus - resolvedPredictionWeight * predictionError + explore * novelty;
+        const errorTerm = predictionError ?? 1;
+        const score = solvedBonus - resolvedPredictionWeight * errorTerm + explore * novelty;
         if (score > bestScore) {
           bestScore = score;
           best = candidate;

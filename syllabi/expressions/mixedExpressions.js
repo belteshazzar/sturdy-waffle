@@ -53,6 +53,7 @@ function encodeTokens(tokens) {
   });
 }
 
+// Local resolver uses explicit facts/relations only (no inference) for determinism.
 function resolveFact(node, factBase) {
   if (node.subject) {
     return factBase.get(node.subject, node.predicate) ?? 0;

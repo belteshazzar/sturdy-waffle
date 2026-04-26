@@ -22,7 +22,8 @@ A JavaScript framework for a **digital brain** that starts with zero knowledge, 
 9. [Introspection](#introspection)
 10. [Advanced Learning Extensions](#advanced-learning-extensions)
 11. [Visualisation-Ready Design](#visualisation-ready-design)
-12. [Project Structure](#project-structure)
+12. [Understanding & Knowledge Ingestion](#understanding--knowledge-ingestion)
+13. [Project Structure](#project-structure)
 
 ---
 
@@ -370,6 +371,10 @@ const answers = brain.answerText(`
 `);
 ```
 
+### `brain.answerFreeForm(text)` → answers[]
+
+Translate simple natural-language questions into structured queries before answering them.
+
 ### Knowledge text format
 
 One statement per line. Lines starting with `#` or `//` are ignored.
@@ -610,6 +615,22 @@ This is ideal for plotting learning curves in a graph.
 
 ---
 
+## Understanding & Knowledge Ingestion
+
+Within this codebase, “understanding” means the Brain can answer structured fact, attribute, and relation queries (plus evaluate expression trees) about a domain it has learned. The Wikipedia ingestion pipeline supports that definition by extracting structured statements from article text, mapping them into the `fact/attribute/relation` schema, and retraining only the affected `facts.*` domains.
+
+Key ingestion capabilities:
+
+- Fetches Wikipedia articles via the public API (summary + optional HTML/Wikitext).
+- Strips markup and segments content into sections/sentences.
+- Extracts a focused set of statements (types, birth/death info, locations, aliases, infobox attributes).
+- Ingests statements through `learnText` with chunking to respect `inputLimits`.
+- Translates free-form questions (e.g., “When was Ada Lovelace born?”) into structured queries for `answerText`/`evaluate`.
+
+See `examples/runWikipediaIngestion.js` for a runnable end-to-end ingestion example.
+
+---
+
 ## Project Structure
 
 ```
@@ -623,6 +644,8 @@ sturdy-waffle/
 │   │   ├── Brain.js                  # Top-level Brain container (EventEmitter)
 │   │   ├── BrainRegion.js            # Specialised region with NN + plasticity
 │   │   └── NeuralNetwork.js          # Feedforward net with backprop & mutation
+│   ├── ingestion/
+│   │   └── index.js                  # Wikipedia ingestion + normalization helpers
 │   ├── learning/
 │   │   ├── Lesson.js                 # Unit of knowledge (domain + training data)
 │   │   └── Syllabus.js               # Ordered collection of lessons
@@ -639,7 +662,8 @@ sturdy-waffle/
 │       └── index.js                  # 7-gate boolean logic syllabus
 │
 ├── examples/
-│   └── runBooleanLogic.js            # Full demo: train → test → save → load
+│   ├── runBooleanLogic.js            # Full demo: train → test → save → load
+│   └── runWikipediaIngestion.js      # Wikipedia ingestion + QA demo
 │
 ├── tests/
 │   ├── neuralNetwork.test.js         # NN unit tests

@@ -29,6 +29,7 @@ const MemorySystem = require('./src/memory/MemorySystem');
 const WorldModel   = require('./src/world/WorldModel');
 const EvaluationSuite = require('./src/evaluation/EvaluationSuite');
 const ExpressionParser = require('./src/parsing/ExpressionParser');
+const Ingestion = require('./src/ingestion');
 const { COMPLEX_SKILLS } = require('./src/skills/ComplexSkills');
 
 // Decomposition subsystem
@@ -59,6 +60,7 @@ module.exports = {
   WorldModel,
   EvaluationSuite,
   ExpressionParser,
+  Ingestion,
   COMPLEX_SKILLS,
   // Decomposition
   WorkingMemory,

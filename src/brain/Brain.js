@@ -12,6 +12,7 @@ const SelfSupervisedLearner = require('../learning/SelfSupervisedLearner');
 const WorldModel       = require('../world/WorldModel');
 const ExpressionParser = require('../parsing/ExpressionParser');
 const KnowledgeTextParser = require('../parsing/KnowledgeTextParser');
+const FreeFormQueryTranslator = require('../parsing/FreeFormQueryTranslator');
 const { buildCapabilityMatrix, DEFAULT_TARGETS: DEFAULT_CAPABILITY_TARGETS } = require('../evaluation/CapabilityMatrix');
 
 // Decomposition modules (loaded lazily to avoid circular deps at startup)
@@ -781,6 +782,43 @@ class Brain extends EventEmitter {
    */
   answerText(text) {
     const queries = this.parseTextQuery(text);
+    return this.answerQueries(queries);
+  }
+
+  /**
+   * Translate free-form questions into structured queries and answer them.
+   *
+   * Falls back to a lightweight rule-based translator when KnowledgeTextParser
+   * cannot parse the input.
+   *
+   * @param {string} text
+   * @param {object} [opts]
+   * @returns {Array<{ query: object, value: any, confidence?: number, source?: string }>}
+   */
+  answerFreeForm(text, opts = {}) {
+    const limits = this.config.inputLimits || {};
+    const lines = (text || '').split(/\r?\n/);
+    const parsed = KnowledgeTextParser.parse(text || '', {
+      mode: 'queries',
+      maxLines: limits.maxLines,
+      maxLineLength: limits.maxLineLength,
+    });
+    const existingQueries = (parsed.queries || []).filter(query => {
+      if (!query.line) return true;
+      const rawLine = lines[query.line - 1] || '';
+      const trimmed = rawLine.trim().toLowerCase();
+      if (!trimmed) return true;
+      if (query.kind === 'fact' && /^(where|when|who|what|how)\b/.test(trimmed)) {
+        return false;
+      }
+      return true;
+    });
+    const translated = FreeFormQueryTranslator.translate(text || '', {
+      ...opts,
+      skipLines: existingQueries.map(query => query.line).filter(Boolean),
+    });
+    const queries = [...existingQueries, ...translated];
+    if (queries.length === 0) return [];
     return this.answerQueries(queries);
   }
 

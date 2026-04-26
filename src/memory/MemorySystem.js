@@ -31,37 +31,98 @@ class MemorySystem {
       for (const predicate of factBase.predicates) {
         const value = factBase.get(subject, predicate);
         if (value !== null) {
+          const meta = factBase.getFactMeta ? factBase.getFactMeta(subject, predicate) : null;
           this.semantic.addFact({
             subject,
             predicate,
             value,
-            confidence: 1,
-            source: 'factBase',
+            confidence: meta?.confidence ?? 1,
+            source: meta?.source || 'factBase',
           });
         }
       }
       for (const attribute of factBase.attributes) {
         const value = factBase.getValue(subject, attribute);
         if (value !== null) {
+          const meta = factBase.getAttributeMeta ? factBase.getAttributeMeta(subject, attribute) : null;
           this.semantic.addFact({
             subject,
             predicate: attribute,
             value,
-            confidence: 1,
-            source: 'factBaseAttribute',
+            confidence: meta?.confidence ?? 1,
+            source: meta?.source || 'factBaseAttribute',
           });
         }
       }
     }
     const relationFacts = factBase.getRelationFacts ? factBase.getRelationFacts() : [];
     relationFacts.forEach(({ relation, args, value }) => {
+      const meta = factBase.getRelationMeta ? factBase.getRelationMeta(relation, args) : null;
       this.semantic.addRelationFact({
         relation,
         args,
         value,
-        confidence: 1,
-        source: 'factBaseRelation',
+        confidence: meta?.confidence ?? 1,
+        source: meta?.source || 'factBaseRelation',
       });
+    });
+  }
+
+  recordTextStatements(statements, { defaultSource = 'text' } = {}) {
+    if (!Array.isArray(statements) || statements.length === 0) return;
+    statements.forEach((statement, index) => {
+      const meta = statement.meta || {};
+      const confidence = meta.confidence ?? 1;
+      const source = meta.source || defaultSource;
+      const line = statement.line || index + 1;
+      if (statement.kind === 'fact') {
+        this.semantic.addFact({
+          subject: statement.subject,
+          predicate: statement.predicate,
+          value: statement.value ? 1 : 0,
+          confidence,
+          source,
+        });
+        this.episodic.addEpisode({
+          domain: 'text.fact',
+          input: [statement.subject, statement.predicate],
+          output: [statement.value ? 1 : 0],
+          tags: ['text'],
+          metadata: { line, source, confidence },
+        });
+      }
+      if (statement.kind === 'attribute') {
+        this.semantic.addFact({
+          subject: statement.subject,
+          predicate: statement.attribute,
+          value: statement.value,
+          confidence,
+          source,
+        });
+        this.episodic.addEpisode({
+          domain: 'text.attribute',
+          input: [statement.subject, statement.attribute],
+          output: [statement.value],
+          tags: ['text'],
+          metadata: { line, source, confidence },
+        });
+      }
+      if (statement.kind === 'relation') {
+        this.semantic.addRelationFact({
+          relation: statement.name,
+          args: statement.args,
+          value: statement.value ? 1 : 0,
+          confidence,
+          source,
+        });
+        this.episodic.addEpisode({
+          domain: 'text.relation',
+          input: [statement.name, ...statement.args],
+          output: [statement.value ? 1 : 0],
+          tags: ['text'],
+          metadata: { line, source, confidence },
+        });
+      }
     });
   }
 

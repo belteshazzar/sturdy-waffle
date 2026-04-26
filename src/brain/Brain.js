@@ -407,8 +407,8 @@ class Brain extends EventEmitter {
     * An additional terminal node form is supported for declarative fact lookups:
     *   • Fact query:     { fact: { subject: <string>, predicate: <string>, infer?: true } }
     *     Requires a FactBase to be loaded via learnFacts(). When `infer` is true
-    *     the Brain consults semantic memory rules/analogies before falling back.
-    *     Returns 0 or 1.
+    *     the Brain consults semantic memory rules/analogies. When omitted or
+    *     false, the Brain queries the trained fact region directly. Returns 0 or 1.
    *
    * @param {object} expression
    * @returns {number}

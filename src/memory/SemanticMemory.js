@@ -36,7 +36,6 @@ class SemanticMemory {
 
   addRule({ name, when, then, confidence = 0.5, support = 1, source = 'induction' }) {
     const ruleName = this._generateRuleName(name, then);
-    if (!name) this._nextRuleId++;
     const rule = {
       name: ruleName,
       when: when || [],
@@ -193,7 +192,9 @@ class SemanticMemory {
 
   _generateRuleName(name, then) {
     if (name) return name;
-    return `rule:${then.predicate}:${this._nextRuleId}`;
+    const generated = `rule:${then.predicate}:${this._nextRuleId}`;
+    this._nextRuleId++;
+    return generated;
   }
 
   getInfo() {

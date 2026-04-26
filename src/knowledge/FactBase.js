@@ -59,12 +59,15 @@ class FactBase {
     this.name       = name;
     this.subjects   = [];          // ordered subject vocabulary
     this._facts     = Object.create(null);   // `${subject}:${predicate}` → 0|1
+    this._factMeta  = Object.create(null);   // `${subject}:${predicate}` → { confidence?, source? }
     this._predicates = [];         // ordered predicate vocabulary (insertion order)
     // Multi-class / categorical attributes
     this._attributeVocab = Object.create(null);  // attribute → string[] (ordered values)
     this._attributeFacts = Object.create(null);  // `${subject}:${attribute}` → string
     this._attributeTypes = Object.create(null);  // attribute → { type, range?, values? }
+    this._attributeMeta = Object.create(null);   // `${subject}:${attribute}` → { confidence?, source? }
     this._relations = Object.create(null);       // relation → { arity, facts: { key: 0|1 } }
+    this._relationMeta = Object.create(null);    // relation → { key: { confidence?, source? } }
   }
 
   // ── Fact management ───────────────────────────────────────────────────────
@@ -81,7 +84,7 @@ class FactBase {
    * @param {boolean} [value=true]
    * @returns {this}  Returns the FactBase for method chaining.
    */
-  assert(subject, predicate, value = true) {
+  assert(subject, predicate, value = true, meta = {}) {
     if (typeof subject   !== 'string' || subject   === '') throw new Error('subject must be a non-empty string');
     if (typeof predicate !== 'string' || predicate === '') throw new Error('predicate must be a non-empty string');
     if (Object.prototype.hasOwnProperty.call(this._attributeVocab, predicate)) {
@@ -99,6 +102,7 @@ class FactBase {
     }
 
     this._facts[`${subject}:${predicate}`] = value ? 1 : 0;
+    this._storeFactMeta(subject, predicate, meta);
     return this;
   }
 
@@ -121,7 +125,7 @@ class FactBase {
    * @param {string} value      e.g. 'red'
    * @returns {this}  Returns the FactBase for method chaining.
    */
-  assertValue(subject, attribute, value) {
+  assertValue(subject, attribute, value, meta = {}) {
     if (typeof subject   !== 'string' || subject   === '') throw new Error('subject must be a non-empty string');
     if (typeof attribute !== 'string' || attribute === '') throw new Error('attribute must be a non-empty string');
     const type = this._attributeTypes[attribute]?.type || 'categorical';
@@ -163,6 +167,7 @@ class FactBase {
         this._attributeTypes[attribute] = { ...existing, range };
       }
     }
+    this._storeAttributeMeta(subject, attribute, meta);
     return this;
   }
 
@@ -179,6 +184,23 @@ class FactBase {
       this._attributeVocab[attribute] = [...opts.values];
     }
     return this;
+  }
+
+  getFactMeta(subject, predicate) {
+    const key = `${subject}:${predicate}`;
+    return this._factMeta[key] ? { ...this._factMeta[key] } : null;
+  }
+
+  getAttributeMeta(subject, attribute) {
+    const key = `${subject}:${attribute}`;
+    return this._attributeMeta[key] ? { ...this._attributeMeta[key] } : null;
+  }
+
+  getRelationMeta(relation, args) {
+    const entry = this._relationMeta[relation];
+    if (!entry) return null;
+    const key = args.join('|');
+    return entry[key] ? { ...entry[key] } : null;
   }
 
   /**
@@ -216,7 +238,7 @@ class FactBase {
 
   // ── Relations ─────────────────────────────────────────────────────────────
 
-  assertRelation(relation, args, value = true) {
+  assertRelation(relation, args, value = true, meta = {}) {
     if (typeof relation !== 'string' || relation === '') throw new Error('relation must be a non-empty string');
     if (!Array.isArray(args) || args.length === 0) throw new Error('relation args must be a non-empty array');
     args.forEach(arg => {
@@ -231,6 +253,7 @@ class FactBase {
     }
     const key = args.join('|');
     this._relations[relation].facts[key] = value ? 1 : 0;
+    this._storeRelationMeta(relation, args, meta);
     return this;
   }
 
@@ -260,6 +283,27 @@ class FactBase {
       }
     }
     return facts;
+  }
+
+  _storeFactMeta(subject, predicate, meta) {
+    const normalized = FactBase._normalizeMeta(meta);
+    if (!normalized) return;
+    this._factMeta[`${subject}:${predicate}`] = normalized;
+  }
+
+  _storeAttributeMeta(subject, attribute, meta) {
+    const normalized = FactBase._normalizeMeta(meta);
+    if (!normalized) return;
+    this._attributeMeta[`${subject}:${attribute}`] = normalized;
+  }
+
+  _storeRelationMeta(relation, args, meta) {
+    const normalized = FactBase._normalizeMeta(meta);
+    if (!normalized) return;
+    if (!this._relationMeta[relation]) {
+      this._relationMeta[relation] = Object.create(null);
+    }
+    this._relationMeta[relation][args.join('|')] = normalized;
   }
 
   /**
@@ -478,14 +522,20 @@ class FactBase {
       subjects:       [...this.subjects],
       predicates:     [...this._predicates],
       facts:          { ...this._facts },
+      factMeta:       { ...this._factMeta },
       attributeVocab: Object.fromEntries(
         Object.entries(this._attributeVocab).map(([k, v]) => [k, [...v]])
       ),
       attributeFacts: { ...this._attributeFacts },
+      attributeMeta:  { ...this._attributeMeta },
       attributeTypes: Object.fromEntries(Object.entries(this._attributeTypes).map(([k, v]) => [k, { ...v }])),
       relations: Object.fromEntries(Object.entries(this._relations).map(([k, v]) => [
         k,
         { arity: v.arity, facts: { ...v.facts } },
+      ])),
+      relationMeta: Object.fromEntries(Object.entries(this._relationMeta).map(([k, v]) => [
+        k,
+        { ...v },
       ])),
     };
   }
@@ -495,6 +545,7 @@ class FactBase {
     fb.subjects      = [...(data.subjects   || [])];
     fb._predicates   = [...(data.predicates || [])];
     fb._facts        = Object.assign(Object.create(null), data.facts || {});
+    fb._factMeta     = Object.assign(Object.create(null), data.factMeta || {});
     // Restore categorical attributes (present in new format; absent in old saves)
     if (data.attributeVocab) {
       for (const [attr, vocab] of Object.entries(data.attributeVocab)) {
@@ -503,6 +554,9 @@ class FactBase {
     }
     if (data.attributeFacts) {
       Object.assign(fb._attributeFacts, data.attributeFacts);
+    }
+    if (data.attributeMeta) {
+      Object.assign(fb._attributeMeta, data.attributeMeta);
     }
     if (data.attributeTypes) {
       for (const [attr, def] of Object.entries(data.attributeTypes)) {
@@ -514,7 +568,23 @@ class FactBase {
         fb._relations[rel] = { arity: info.arity, facts: { ...info.facts } };
       }
     }
+    if (data.relationMeta) {
+      for (const [rel, meta] of Object.entries(data.relationMeta)) {
+        fb._relationMeta[rel] = { ...meta };
+      }
+    }
     return fb;
+  }
+
+  static _normalizeMeta(meta) {
+    if (!meta || typeof meta !== 'object') return null;
+    const normalized = {};
+    if (meta.confidence !== undefined && meta.confidence !== null) {
+      const num = Number(meta.confidence);
+      if (!Number.isNaN(num)) normalized.confidence = num;
+    }
+    if (meta.source) normalized.source = meta.source;
+    return Object.keys(normalized).length > 0 ? normalized : null;
   }
 }
 

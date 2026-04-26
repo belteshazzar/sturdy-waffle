@@ -342,6 +342,54 @@ const result = brain.evaluate({
 });
 ```
 
+### `brain.learnText(text, opts?)` → { statements, trainedDomains, results }
+
+Parse controlled knowledge text and update the FactBase. Only the affected
+`facts.<predicate|attribute|relation>` domains are retrained.
+
+```javascript
+const result = brain.learnText(`
+  fact: bird canFly
+  fact: penguin not canFly
+  attribute: apple color = red
+  attribute: mars radius = 3390; type=numeric
+  relation: parentOf(alice,bob) = true
+`, { source: 'manual' });
+```
+
+### `brain.answerText(text)` → answers[]
+
+Parse text queries and return structured answers.
+
+```javascript
+const answers = brain.answerText(`
+  Is bird canFly?
+  What is apple color?
+  Is parentOf(alice,bob)?
+  expr: AND(1,0)
+`);
+```
+
+### Knowledge text format
+
+One statement per line. Lines starting with `#` or `//` are ignored.
+
+- **Facts**: `fact: <subject> <predicate> [= true|false]`
+- **Attributes**: `attribute: <subject> <attribute> = <value>`
+- **Relations**: `relation: <name>(arg1,arg2,...) [= true|false]`
+- **Negation**: `fact: penguin not canFly` or `= false`
+- **Numeric values**: use `type=numeric` metadata or a numeric value
+- **Metadata**: append `; confidence=0.8; source=manual`
+
+Queries (one per line):
+
+- `Is <subject> <predicate>?`
+- `What is <subject> <attribute>?`
+- `Is <relation>(arg1,arg2,...)?`
+- `fact?`, `attribute?`, `relation?` tagged queries
+- `expr: <expression>` (uses `evaluateString`)
+- `solve: <expression>` (uses `solveString`)
+
 ### `brain.knows(domain)` → boolean
 
 `true` if the region is trained and confirmed accurate.

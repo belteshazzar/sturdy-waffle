@@ -11,6 +11,7 @@ const MetaLearner      = require('./MetaLearner');
 const SelfSupervisedLearner = require('../learning/SelfSupervisedLearner');
 const WorldModel       = require('../world/WorldModel');
 const ExpressionParser = require('../parsing/ExpressionParser');
+const KnowledgeTextParser = require('../parsing/KnowledgeTextParser');
 
 // Decomposition modules (loaded lazily to avoid circular deps at startup)
 const {
@@ -564,6 +565,61 @@ class Brain extends EventEmitter {
   }
 
   /**
+   * Parse and ingest knowledge text, updating the FactBase and retraining only
+   * the affected fact/attribute/relation domains.
+   *
+   * @param {string} text
+   * @param {object} [opts]
+   * @param {string} [opts.name='TextFacts']  FactBase name when creating new
+   * @param {string} [opts.source='text']     Default source metadata
+   * @param {boolean} [opts.retrain=true]     Whether to retrain affected domains
+   * @returns {{ statements: object[], trainedDomains: string[], results: object[] }}
+   */
+  learnText(text, opts = {}) {
+    const { name = 'TextFacts', source = 'text', retrain = true } = opts;
+    const { statements } = KnowledgeTextParser.parse(text, { mode: 'statements', defaultSource: source });
+    if (statements.length === 0) {
+      return { statements: [], trainedDomains: [], results: [] };
+    }
+
+    if (!this.factBase) {
+      this.factBase = new FactBase(name);
+    }
+    const affectedDomains = new Set();
+    statements.forEach(statement => {
+      const meta = statement.meta || {};
+      if (statement.kind === 'fact') {
+        this.factBase.assert(statement.subject, statement.predicate, statement.value, meta);
+        affectedDomains.add(`facts.${statement.predicate}`);
+      } else if (statement.kind === 'attribute') {
+        const type = meta.type || (typeof statement.value === 'number' ? 'numeric' : 'categorical');
+        if (type === 'numeric') {
+          this.factBase.defineAttribute(statement.attribute, { type: 'numeric' });
+        }
+        this.factBase.assertValue(statement.subject, statement.attribute, statement.value, meta);
+        affectedDomains.add(`facts.${statement.attribute}`);
+      } else if (statement.kind === 'relation') {
+        this.factBase.assertRelation(statement.name, statement.args, statement.value, meta);
+        affectedDomains.add(`facts.${statement.name}`);
+      }
+    });
+
+    this.memory.recordTextStatements(statements, { defaultSource: source });
+
+    let results = [];
+    if (retrain) {
+      const lessons = this.factBase.toLessons().filter(lesson => affectedDomains.has(lesson.domain));
+      results = lessons.map(lesson => ({
+        domain: lesson.domain,
+        ...this.learn(lesson),
+      }));
+    }
+    this.memory.semantic.induceRulesFromFactBase(this.factBase);
+
+    return { statements, trainedDomains: [...affectedDomains], results };
+  }
+
+  /**
    * Query a single fact by name.
    *
    * Encodes the subject using the stored FactBase vocabulary and runs a binary
@@ -643,6 +699,50 @@ class Brain extends EventEmitter {
       throw new Error(`No relation '${relation}' found for args [${args.join(', ')}].`);
     }
     return value;
+  }
+
+  /**
+   * Parse text queries into structured query objects.
+   */
+  parseTextQuery(text) {
+    return KnowledgeTextParser.parse(text, { mode: 'queries' }).queries;
+  }
+
+  /**
+   * Answer text queries using the loaded FactBase and expression evaluators.
+   *
+   * @param {string} text
+   * @returns {Array<{ query: object, value: any, confidence?: number, source?: string }>}
+   */
+  answerText(text) {
+    const queries = this.parseTextQuery(text);
+    return queries.map(query => {
+      if (query.kind === 'fact') {
+        if (query.infer) {
+          const inferred = this.inferFact(query.subject, query.predicate);
+          return { query, value: inferred.value, confidence: inferred.confidence, source: inferred.source };
+        }
+        return { query, value: this.queryFact(query.subject, query.predicate), confidence: 1, source: 'factBase' };
+      }
+      if (query.kind === 'attribute') {
+        return { query, value: this.queryAttribute(query.subject, query.attribute), confidence: 1, source: 'factBase' };
+      }
+      if (query.kind === 'relation') {
+        if (query.infer) {
+          const inferred = this.inferRelation(query.name, query.args);
+          return { query, value: inferred.value, confidence: inferred.confidence, source: inferred.source };
+        }
+        return { query, value: this.queryRelation(query.name, query.args), confidence: 1, source: 'factBase' };
+      }
+      if (query.kind === 'expression') {
+        if (query.mode === 'solve') {
+          const solved = this.solveString(query.expression);
+          return { query, value: solved.answer, confidence: solved.solved ? 1 : 0, source: 'solveString' };
+        }
+        return { query, value: this.evaluateString(query.expression), confidence: 1, source: 'evaluateString' };
+      }
+      throw new Error(`Unknown query kind '${query.kind}'`);
+    });
   }
 
   // ── Reasoning & discovery ──────────────────────────────────────────────────

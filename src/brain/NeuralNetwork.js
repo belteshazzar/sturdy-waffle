@@ -114,7 +114,7 @@ class NeuralNetwork {
    * @param {number[]} target
    * @returns {number} sample loss
    */
-  backward(input, target) {
+  backward(input, target, regularization = null) {
     const { activations, zValues } = this.forward(input);
     const numLayers = this.layers.length;
     const deltas    = new Array(numLayers);
@@ -149,12 +149,25 @@ class NeuralNetwork {
     for (let l = 0; l < numLayers; l++) {
       const layer     = this.layers[l];
       const prevActs  = activations[l];
+      const anchorLayer = regularization && regularization.anchor && regularization.anchor.layers
+        ? regularization.anchor.layers[l]
+        : null;
+      const hasAnchor = anchorLayer &&
+        anchorLayer.weights.length === layer.weights.length &&
+        anchorLayer.weights[0] &&
+        anchorLayer.weights[0].length === layer.weights[0].length;
 
       for (let i = 0; i < layer.weights.length; i++) {
         for (let j = 0; j < layer.weights[i].length; j++) {
           layer.weights[i][j] -= this.learningRate * deltas[l][i] * prevActs[j];
+          if (hasAnchor) {
+            layer.weights[i][j] -= this.learningRate * regularization.lambda * (layer.weights[i][j] - anchorLayer.weights[i][j]);
+          }
         }
         layer.biases[i] -= this.learningRate * deltas[l][i];
+        if (hasAnchor) {
+          layer.biases[i] -= this.learningRate * regularization.lambda * (layer.biases[i] - anchorLayer.biases[i]);
+        }
       }
     }
 
@@ -175,7 +188,7 @@ class NeuralNetwork {
    * @param {number[]} target
    * @returns {{ loss: number, inputGrad: number[] }}
    */
-  backwardWithInputGrad(input, target) {
+  backwardWithInputGrad(input, target, regularization = null) {
     const { activations, zValues } = this.forward(input);
     const numLayers = this.layers.length;
     const deltas    = new Array(numLayers);
@@ -206,11 +219,24 @@ class NeuralNetwork {
     for (let l = 0; l < numLayers; l++) {
       const layer    = this.layers[l];
       const prevActs = activations[l];
+      const anchorLayer = regularization && regularization.anchor && regularization.anchor.layers
+        ? regularization.anchor.layers[l]
+        : null;
+      const hasAnchor = anchorLayer &&
+        anchorLayer.weights.length === layer.weights.length &&
+        anchorLayer.weights[0] &&
+        anchorLayer.weights[0].length === layer.weights[0].length;
       for (let i = 0; i < layer.weights.length; i++) {
         for (let j = 0; j < layer.weights[i].length; j++) {
           layer.weights[i][j] -= this.learningRate * deltas[l][i] * prevActs[j];
+          if (hasAnchor) {
+            layer.weights[i][j] -= this.learningRate * regularization.lambda * (layer.weights[i][j] - anchorLayer.weights[i][j]);
+          }
         }
         layer.biases[i] -= this.learningRate * deltas[l][i];
+        if (hasAnchor) {
+          layer.biases[i] -= this.learningRate * regularization.lambda * (layer.biases[i] - anchorLayer.biases[i]);
+        }
       }
     }
 
@@ -238,8 +264,9 @@ class NeuralNetwork {
    * @param {boolean} [shuffle=true]
    * @returns {{ finalLoss: number, losses: number[] }}
    */
-  train(samples, epochs = 100, shuffle = true) {
+  train(samples, epochs = 100, shuffle = true, options = {}) {
     const losses = [];
+    const regularization = options.regularization || null;
 
     for (let epoch = 0; epoch < epochs; epoch++) {
       let data = [...samples];
@@ -253,7 +280,7 @@ class NeuralNetwork {
 
       let epochLoss = 0;
       for (const sample of data) {
-        epochLoss += this.backward(sample.input, sample.output);
+        epochLoss += this.backward(sample.input, sample.output, regularization);
       }
       losses.push(epochLoss / data.length);
     }

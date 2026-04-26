@@ -20,8 +20,9 @@ A JavaScript framework for a **digital brain** that starts with zero knowledge, 
 7. [Boolean Logic Syllabus](#boolean-logic-syllabus)
 8. [Saving & Loading Brain State](#saving--loading-brain-state)
 9. [Introspection](#introspection)
-10. [Visualisation-Ready Design](#visualisation-ready-design)
-11. [Project Structure](#project-structure)
+10. [Advanced Learning Extensions](#advanced-learning-extensions)
+11. [Visualisation-Ready Design](#visualisation-ready-design)
+12. [Project Structure](#project-structure)
 
 ---
 
@@ -473,6 +474,31 @@ Returns:
   }
 }
 ```
+
+---
+
+## Advanced Learning Extensions
+
+The Brain now supports opt-in mechanisms for few-shot learning, memory, and self-learning:
+
+- **Shared Embeddings** — enable a global input embedding bank shared across domains:
+  ```javascript
+  const brain = new Brain({
+    sharedEmbedding: { enabled: true, embeddingSize: 8, prototypeCount: 8 },
+  });
+  ```
+- **Episodic + Semantic Memory** — automatic recording of training samples and
+  induced facts/rules (see `brain.memory`).
+- **Self-supervised loops** — call `brain.selfSupervise()` to update shared
+  embeddings and autoencoders from stored experiences.
+- **Self-learning pipeline** — `brain.selfLearn()` consolidates episodes into
+  semantic concepts and rule-based inferences.
+- **Active learning** — `brain.suggestLessons(lessons)` returns the most
+  uncertain/novel samples to teach next.
+- **Evaluation suites** — `brain.baselineReport({ syllabi })` and
+  `brain.evaluateSuite({ syllabi, expressions, transferPairs })`.
+- **World model** — `brain.observeTransition(state, nextState)` and
+  `brain.predictNextState(state)` for predictive coding experiments.
 
 ---
 

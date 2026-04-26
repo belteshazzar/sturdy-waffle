@@ -4,6 +4,11 @@ const { EventEmitter } = require('events');
 const BrainRegion      = require('./BrainRegion');
 const Router           = require('../routing/Router');
 const FactBase         = require('../knowledge/FactBase');
+const MemorySystem     = require('../memory/MemorySystem');
+const SharedEmbeddingBank = require('./SharedEmbeddingBank');
+const MetaLearner      = require('./MetaLearner');
+const SelfSupervisedLearner = require('../learning/SelfSupervisedLearner');
+const WorldModel       = require('../world/WorldModel');
 
 // Decomposition modules (loaded lazily to avoid circular deps at startup)
 const {
@@ -62,14 +67,85 @@ class Brain extends EventEmitter {
   constructor(config = {}) {
     super();
 
-    this.config = {
+    const defaults = {
       defaultTargetAccuracy: 0.99,
       maxMutations:          12,
       epochsPerRound:        500,
       maxEpochsTotal:        30000,
       regressionTolerance:   0.05,
       verbose:               false,
+      sharedEmbedding: {
+        enabled:        false,
+        embeddingSize:  8,
+        prototypeCount: 8,
+        learningRate:   0.2,
+      },
+      memory: {
+        episodicCapacity: 2000,
+        semanticCapacity: 2000,
+      },
+      continualLearning: {
+        replay:        { enabled: false, sampleCount: 32 },
+        consolidation: { enabled: false, lambda: 0.015 },
+      },
+      metaLearning: {
+        enabled:      false,
+        maxSnapshots: 32,
+      },
+      selfSupervised: {
+        enabled:     false,
+        sampleCount: 64,
+        epochs:      40,
+      },
+      worldModel: {
+        enabled:        false,
+        maxTransitions: 5000,
+      },
+      activeLearning: {
+        uncertaintyWeight: 0.7,
+        noveltyWeight:     0.3,
+      },
+    };
+
+    this.config = {
+      ...defaults,
       ...config,
+      sharedEmbedding: {
+        ...defaults.sharedEmbedding,
+        ...(config.sharedEmbedding || {}),
+      },
+      memory: {
+        ...defaults.memory,
+        ...(config.memory || {}),
+      },
+      continualLearning: {
+        ...defaults.continualLearning,
+        ...(config.continualLearning || {}),
+        replay: {
+          ...defaults.continualLearning.replay,
+          ...((config.continualLearning && config.continualLearning.replay) || {}),
+        },
+        consolidation: {
+          ...defaults.continualLearning.consolidation,
+          ...((config.continualLearning && config.continualLearning.consolidation) || {}),
+        },
+      },
+      metaLearning: {
+        ...defaults.metaLearning,
+        ...(config.metaLearning || {}),
+      },
+      selfSupervised: {
+        ...defaults.selfSupervised,
+        ...(config.selfSupervised || {}),
+      },
+      worldModel: {
+        ...defaults.worldModel,
+        ...(config.worldModel || {}),
+      },
+      activeLearning: {
+        ...defaults.activeLearning,
+        ...(config.activeLearning || {}),
+      },
     };
 
     this.regions       = new Map();   // domain → BrainRegion
@@ -81,6 +157,19 @@ class Brain extends EventEmitter {
     this.learnedRouter = null;   // LearnedRouter (Phase 3) — null until initialised
     this.stringEncoder = null;   // StringEncoder (Phase 4) — null until trained
     this.factBase      = null;   // FactBase — null until learnFacts() is called
+    this.memory        = new MemorySystem(this.config.memory);
+    this.sharedEmbedding = this.config.sharedEmbedding.enabled
+      ? new SharedEmbeddingBank(this.config.sharedEmbedding)
+      : null;
+    this.metaLearner   = this.config.metaLearning.enabled
+      ? new MetaLearner(this.config.metaLearning)
+      : null;
+    this.selfSupervisedLearner = this.config.selfSupervised.enabled
+      ? new SelfSupervisedLearner(this.config.selfSupervised)
+      : null;
+    this.worldModel = this.config.worldModel.enabled
+      ? new WorldModel(this.config.worldModel)
+      : null;
 
     if (this.config.verbose) {
       this._setupVerboseLogging();
@@ -123,7 +212,13 @@ class Brain extends EventEmitter {
       regressionTolerance: this.config.regressionTolerance,
     };
 
-    const region = new BrainRegion({ domain: lesson.domain, lesson, config: regionConfig });
+    const region = new BrainRegion({
+      domain: lesson.domain,
+      lesson,
+      config: regionConfig,
+      sharedEmbedding: this.sharedEmbedding,
+      metaLearner: this.metaLearner,
+    });
 
     // Bubble up region events to the Brain so callers can subscribe once
     region.on('mutation',          data => this.emit('mutation',             data));
@@ -162,9 +257,22 @@ class Brain extends EventEmitter {
     const region = this.regions.get(domain);
     this.emit('lesson:start', { domain, lessonName: lesson.name });
 
+    if (this.config.continualLearning.replay.enabled) {
+      const replay = this.memory.episodic.sample({
+        domain,
+        limit: this.config.continualLearning.replay.sampleCount,
+      }).map(ep => ({ input: ep.input, output: ep.output }));
+      region.setReplaySamples(replay);
+    }
+    region.setConsolidationConfig(this.config.continualLearning.consolidation);
+
     const result = region.train();
 
     this._updateKnowledgeTree(domain);
+    this.memory.recordLesson(lesson);
+    if (this.metaLearner) {
+      this.metaLearner.registerRegion(region);
+    }
 
     this.emit('lesson:complete', {
       domain,
@@ -313,7 +421,14 @@ class Brain extends EventEmitter {
           'Call brain.learnFacts(factBase) first.'
         );
       }
-      const { subject, predicate } = expression.fact;
+      const { subject, predicate, infer } = expression.fact;
+      if (infer) {
+        const inferred = this.inferFact(subject, predicate);
+        if (inferred.value === null) {
+          throw new Error(`Unable to infer fact '${subject}:${predicate}'.`);
+        }
+        return inferred.value;
+      }
       return this.queryFact(subject, predicate);
     }
 
@@ -377,6 +492,7 @@ class Brain extends EventEmitter {
    */
   learnFacts(factBase) {
     this.factBase = factBase;
+    this.memory.recordFactBase(factBase);
 
     const results = factBase.toLessons().map(lesson => ({
       predicate: lesson.domain.split('.')[1],
@@ -384,6 +500,7 @@ class Brain extends EventEmitter {
       ...this.learn(lesson),
     }));
 
+    this.memory.semantic.induceRulesFromFactBase(factBase);
     return results;
   }
 
@@ -445,6 +562,84 @@ class Brain extends EventEmitter {
 
     const argmax = region.predictArgmax([encoded]);
     return vocab[argmax];
+  }
+
+  // ── Reasoning & discovery ──────────────────────────────────────────────────
+
+  /**
+   * Infer a fact using semantic memory rules or analogies when explicit facts
+   * are missing.
+   */
+  inferFact(subject, predicate) {
+    if (!this.factBase) {
+      throw new Error('No FactBase is loaded. Call brain.learnFacts(factBase) first.');
+    }
+    const explicit = this.factBase.get(subject, predicate);
+    if (explicit !== null) {
+      return { value: explicit, confidence: 1, source: 'factBase' };
+    }
+    const ruleInference = this.memory.semantic.inferFromRules({
+      subject,
+      predicate,
+      factBase: this.factBase,
+    });
+    if (ruleInference) return ruleInference;
+    const analogy = this.memory.semantic.inferByAnalogy({
+      subject,
+      predicate,
+      factBase: this.factBase,
+    });
+    return analogy || { value: null, confidence: 0, source: 'unknown' };
+  }
+
+  /**
+   * Suggest informative training samples based on uncertainty + novelty.
+   */
+  suggestLessons(lessons, { limit = 5 } = {}) {
+    const scored = [];
+    lessons.forEach(lesson => {
+      lesson.trainingData.forEach(sample => {
+        const uncertainty = this._estimateUncertainty(lesson.domain, sample.input, lesson.mode);
+        const novelty = this._estimateNovelty(lesson.domain, sample.input);
+        const score = (
+          this.config.activeLearning.uncertaintyWeight * uncertainty +
+          this.config.activeLearning.noveltyWeight * novelty
+        );
+        scored.push({
+          domain: lesson.domain,
+          input: sample.input,
+          output: sample.output,
+          uncertainty,
+          novelty,
+          score,
+        });
+      });
+    });
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, limit);
+  }
+
+  _estimateUncertainty(domain, input, mode = 'classification') {
+    const region = this.router.route(domain);
+    if (!region) return 1;
+    if (mode === 'multiclass') {
+      const probs = region.predict(input);
+      const max = Math.max(...probs);
+      return 1 - max;
+    }
+    if (mode === 'regression') {
+      return Math.min(1, 1 - region.accuracy);
+    }
+    const pred = region.predict(input)[0];
+    return 1 - Math.abs(pred - 0.5) * 2;
+  }
+
+  _estimateNovelty(domain, input) {
+    const nearest = this.memory.episodic.query({ domain, input, limit: 1 });
+    if (!nearest.length) return 1;
+    const length = input.length || 1;
+    const distance = Math.abs(nearest[0].input.reduce((acc, v, i) => acc + Math.abs(v - input[i]), 0));
+    return Math.min(1, distance / length);
   }
 
   // ── Decomposition controller ──────────────────────────────────────────────
@@ -798,8 +993,97 @@ class Brain extends EventEmitter {
     }
     return this.solve(tokenIds, opts);
   }
+ 
+  // ── Self-supervised learning & evaluation ──────────────────────────────────
 
+  selfSupervise({ sampleCount, epochs } = {}) {
+    const count = sampleCount || this.config.selfSupervised.sampleCount;
+    const episodes = this.memory.episodic.sample({ limit: count });
+    if (this.sharedEmbedding) {
+      this.sharedEmbedding.updateWithSamples(episodes);
+    }
+    let selfSupervisedResult = null;
+    if (this.selfSupervisedLearner) {
+      selfSupervisedResult = this.selfSupervisedLearner.trainFromEpisodes(episodes, {
+        epochs: epochs || this.config.selfSupervised.epochs,
+      });
+    }
+    if (this.worldModel) {
+      const ordered = [...episodes].sort((a, b) => a.timestamp - b.timestamp);
+      for (let i = 0; i < ordered.length - 1; i++) {
+        this.worldModel.observe(ordered[i].input, ordered[i + 1].input);
+      }
+    }
+    return {
+      episodes: episodes.length,
+      selfSupervised: selfSupervisedResult,
+      worldModelUpdated: !!this.worldModel,
+    };
+  }
 
+  selfLearn({ minSupport = 2, minConfidence = 0.8, promoteToFactBase = false } = {}) {
+    const { concepts, rules } = this.memory.consolidate({
+      factBase: this.factBase,
+      minSupport,
+      minConfidence,
+    });
+    const inferredFacts = [];
+    if (this.factBase) {
+      for (const rule of rules) {
+        for (const subject of this.factBase.subjects) {
+          if (this.factBase.get(subject, rule.then.predicate) !== null) continue;
+          const inference = this.memory.semantic.inferFromRules({
+            subject,
+            predicate: rule.then.predicate,
+            factBase: this.factBase,
+          });
+          if (inference && inference.value !== null) {
+            const fact = this.memory.semantic.addFact({
+              subject,
+              predicate: rule.then.predicate,
+              value: inference.value,
+              confidence: inference.confidence,
+              source: inference.source,
+            });
+            inferredFacts.push(fact);
+            if (promoteToFactBase) {
+              this.factBase.assert(subject, rule.then.predicate, inference.value === 1);
+            }
+          }
+        }
+      }
+    }
+    return { concepts, rules, facts: inferredFacts };
+  }
+
+  observeTransition(state, nextState) {
+    if (!this.worldModel) return { observed: false };
+    this.worldModel.observe(state, nextState);
+    return { observed: true };
+  }
+
+  predictNextState(state) {
+    if (!this.worldModel) return null;
+    return this.worldModel.predict(state);
+  }
+
+  baselineReport({ syllabi = [], shots = 4 } = {}) {
+    const EvaluationSuite = require('../evaluation/EvaluationSuite');
+    const suite = new EvaluationSuite({
+      brain: this,
+      brainFactory: () => new Brain(this.config),
+    });
+    return suite.baseline({ syllabi, shots });
+  }
+
+  evaluateSuite({ syllabi, expressions, transferPairs, factBase, shots } = {}) {
+    const EvaluationSuite = require('../evaluation/EvaluationSuite');
+    const suite = new EvaluationSuite({
+      brain: this,
+      brainFactory: () => new Brain(this.config),
+    });
+    return suite.runAll({ syllabi, expressions, transferPairs, factBase, shots });
+  }
 
   _updateKnowledgeTree(domain) {
     const parts = domain.split('.');
@@ -851,6 +1135,17 @@ class Brain extends EventEmitter {
       controller:    this.controller    ? this.controller.getInfo()    : null,
       learnedRouter: this.learnedRouter ? this.learnedRouter.toJSON()  : null,
       stringEncoder: this.stringEncoder ? this.stringEncoder.toJSON()  : null,
+      sharedEmbedding: this.sharedEmbedding ? this.sharedEmbedding.getInfo() : null,
+      metaLearner:      this.metaLearner ? this.metaLearner.getInfo() : null,
+      selfSupervised:   this.selfSupervisedLearner ? this.selfSupervisedLearner.getInfo() : null,
+      worldModel:       this.worldModel ? this.worldModel.getInfo() : null,
+      memory:           this.memory.getInfo(),
+      capabilityGaps: Object.fromEntries(
+        Object.entries(regions).map(([domain, info]) => [
+          domain,
+          Math.max(0, this.config.defaultTargetAccuracy - info.accuracy),
+        ])
+      ),
       factBase:      this.factBase ? {
         name:           this.factBase.name,
         subjectCount:   this.factBase.subjects.length,
@@ -901,6 +1196,11 @@ class Brain extends EventEmitter {
       learnedRouter: this.learnedRouter ? this.learnedRouter.toJSON() : null,
       stringEncoder: this.stringEncoder ? this.stringEncoder.toJSON() : null,
       factBase:      this.factBase      ? this.factBase.toJSON()      : null,
+      memory:        this.memory        ? this.memory.toJSON()        : null,
+      sharedEmbedding: this.sharedEmbedding ? this.sharedEmbedding.toJSON() : null,
+      metaLearner:     this.metaLearner ? this.metaLearner.toJSON() : null,
+      selfSupervisedLearner: this.selfSupervisedLearner ? this.selfSupervisedLearner.toJSON() : null,
+      worldModel:     this.worldModel ? this.worldModel.toJSON() : null,
     };
   }
 
@@ -909,9 +1209,14 @@ class Brain extends EventEmitter {
     brain.version       = data.version    || '1.0.0';
     brain.createdAt     = data.createdAt  || new Date().toISOString();
     brain.knowledgeTree = data.knowledgeTree || {};
+    if (data.sharedEmbedding) {
+      brain.sharedEmbedding = SharedEmbeddingBank.fromJSON(data.sharedEmbedding);
+    }
 
     for (const { domain, region: regionData } of (data.regions || [])) {
-      const region = BrainRegion.fromJSON(regionData);
+      const region = BrainRegion.fromJSON(regionData, {
+        sharedEmbedding: brain.sharedEmbedding,
+      });
       brain.regions.set(domain, region);
       brain.router.register(domain, region);
     }
@@ -927,6 +1232,18 @@ class Brain extends EventEmitter {
     }
     if (data.factBase) {
       brain.factBase = FactBase.fromJSON(data.factBase);
+    }
+    if (data.memory) {
+      brain.memory = MemorySystem.fromJSON(data.memory);
+    }
+    if (data.metaLearner) {
+      brain.metaLearner = MetaLearner.fromJSON(data.metaLearner);
+    }
+    if (data.selfSupervisedLearner) {
+      brain.selfSupervisedLearner = SelfSupervisedLearner.fromJSON(data.selfSupervisedLearner);
+    }
+    if (data.worldModel) {
+      brain.worldModel = WorldModel.fromJSON(data.worldModel);
     }
 
     return brain;

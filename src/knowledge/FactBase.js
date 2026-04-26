@@ -217,6 +217,19 @@ class FactBase {
     return n === 1 ? 0.5 : idx / (n - 1);
   }
 
+  /**
+   * Decode a normalised subject scalar back to the nearest subject label.
+   * @param {number} encoded
+   * @returns {string|null}
+   */
+  decodeSubject(encoded) {
+    const n = this.subjects.length;
+    if (n === 0) return null;
+    if (n === 1) return this.subjects[0];
+    const idx = Math.min(n - 1, Math.max(0, Math.round(encoded * (n - 1))));
+    return this.subjects[idx];
+  }
+
   // ── Lesson generation ─────────────────────────────────────────────────────
 
   /**

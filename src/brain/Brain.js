@@ -851,13 +851,19 @@ class Brain extends EventEmitter {
 
     if (typeof input === 'string') {
       const limits = this.config.inputLimits || {};
-      const parsed = KnowledgeTextParser.parse(input, {
-        mode: 'both',
-        defaultSource: opts.source || 'text',
-        maxLines: limits.maxLines,
-        maxLineLength: limits.maxLineLength,
-      });
-      if (parsed.statements.length || parsed.queries.length) {
+      let parsed = null;
+      try {
+        parsed = KnowledgeTextParser.parse(input, {
+          mode: 'both',
+          defaultSource: opts.source || 'text',
+          maxLines: limits.maxLines,
+          maxLineLength: limits.maxLineLength,
+        });
+      } catch (err) {
+        if (opts.strictKnowledge) throw err;
+        parsed = null;
+      }
+      if (parsed && (parsed.statements.length || parsed.queries.length)) {
         if ((opts.prefer === 'statements' || opts.mode === 'learn') && parsed.statements.length) {
           return { kind: 'knowledge', statements: parsed.statements, raw: input };
         }

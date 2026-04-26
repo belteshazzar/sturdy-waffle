@@ -45,19 +45,6 @@ const ARITY = Object.freeze({
   [TOKEN.NOT]:  1,
 });
 
-// ── Domain mapping ────────────────────────────────────────────────────────────
-
-/** Maps an operator token to the Brain domain that evaluates it */
-const TOKEN_DOMAIN = Object.freeze({
-  [TOKEN.AND]:  'boolean.AND',
-  [TOKEN.OR]:   'boolean.OR',
-  [TOKEN.NOT]:  'boolean.NOT',
-  [TOKEN.XOR]:  'boolean.XOR',
-  [TOKEN.NAND]: 'boolean.NAND',
-  [TOKEN.NOR]:  'boolean.NOR',
-  [TOKEN.XNOR]: 'boolean.XNOR',
-});
-
 /** All operator tokens (excludes NULL, V0, V1) */
 const OPERATIONS = Object.freeze([
   TOKEN.AND, TOKEN.OR, TOKEN.NOT,
@@ -78,7 +65,6 @@ module.exports = {
   TOKEN,
   TOKEN_NAMES,
   ARITY,
-  TOKEN_DOMAIN,
   OPERATIONS,
   VALUES,
   VOCAB_SIZE,

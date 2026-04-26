@@ -31,7 +31,7 @@ const {
   evalOp,
 } = require('../syllabi/decomposition');
 
-const { TOKEN, ARITY, TOKEN_DOMAIN, VOCAB_SIZE } = tokens;
+const { TOKEN, ARITY, VOCAB_SIZE } = tokens;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -491,14 +491,18 @@ describe('Brain.trainDecomposition() + solve() — integration', () => {
     for (const { tokens: toks, answer } of ps) {
       const op = toks[0];
       // Only test domains the brain has been trained on
-      if (!brain.router.hasRoute(TOKEN_DOMAIN[op])) continue;
+      const domain = brain._resolveTokenDomain(op);
+      if (!domain || !brain.router.hasRoute(domain)) continue;
       const res = brain.solve(toks, { forceExplore: false });
       if (res.solved && res.answer === answer) ok++;
     }
     // Expect at least 75% of tested depth-1 problems to be solved correctly.
     // The controller is trained with random initialisation and stochastic
     // curriculum sampling, so we allow some variance in this integration test.
-    const tested = ps.filter(p => brain.router.hasRoute(TOKEN_DOMAIN[p.tokens[0]])).length;
+    const tested = ps.filter(p => {
+      const domain = brain._resolveTokenDomain(p.tokens[0]);
+      return domain && brain.router.hasRoute(domain);
+    }).length;
     expect(ok / tested).toBeGreaterThanOrEqual(0.75);
   });
 

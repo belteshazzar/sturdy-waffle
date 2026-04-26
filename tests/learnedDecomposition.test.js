@@ -40,7 +40,7 @@ const {
   DecompositionCurriculum,
 } = require('../syllabi/decomposition');
 
-const { TOKEN, VOCAB_SIZE, TOKEN_DOMAIN } = tokens;
+const { TOKEN, VOCAB_SIZE } = tokens;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -653,7 +653,7 @@ describe('Brain — Phase 3 LearnedRouter', () => {
   });
 
   test('learnedRouter covers all boolean domains', () => {
-    const domainValues = Object.values(TOKEN_DOMAIN);
+    const domainValues = Array.from(brain.regions.keys());
     for (const d of domainValues) {
       expect(brain.learnedRouter.domains).toContain(d);
     }
@@ -676,10 +676,12 @@ describe('Brain — Phase 3 LearnedRouter', () => {
 // ── 12. Brain toJSON/fromJSON with all phases ─────────────────────────────────
 
 describe('Brain serialisation with learned components', () => {
+  const routerDomains = ['boolean.AND', 'boolean.OR'];
+
   test('toJSON/fromJSON preserves learnedRouter', () => {
     const brain = new Brain();
     brain.initController({ embeddingDim: EMBED_DIM });
-    brain.initLearnedRouter();
+    brain.initLearnedRouter({ domains: routerDomains });
     const json    = brain.toJSON();
     expect(json.learnedRouter).not.toBeNull();
     const brain2  = Brain.fromJSON(json);
@@ -701,7 +703,7 @@ describe('Brain serialisation with learned components', () => {
   test('introspect() includes learnedRouter and stringEncoder', () => {
     const brain = new Brain();
     brain.initController({ embeddingDim: EMBED_DIM });
-    brain.initLearnedRouter();
+    brain.initLearnedRouter({ domains: routerDomains });
     brain.stringEncoder = new StringEncoder({ vocabSize: VOCAB_SIZE });
     const info = brain.introspect();
     expect(info.learnedRouter).not.toBeNull();

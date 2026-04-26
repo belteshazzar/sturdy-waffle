@@ -5,6 +5,7 @@ const { colorFacts,  colorSyllabus  } = require('../syllabi/facts/colorFacts');
 const { shapeFacts,  shapeSyllabus  } = require('../syllabi/facts/shapeFacts');
 const { sizeFacts,   sizeSyllabus   } = require('../syllabi/facts/sizeFacts');
 const { worldFacts,  worldSyllabus  } = require('../syllabi/facts/worldFacts');
+const { vehicleFacts, vehicleSyllabus } = require('../syllabi/facts/vehicleFacts');
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -342,6 +343,81 @@ describe('Brain — learnFacts with worldFacts', () => {
     const brain = fastBrain();
     brain.learnFacts(worldFacts);
     const result = brain.queryFact('saturn', 'hasRings');
+    expect([0, 1]).toContain(result);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// vehicleFacts — structural tests (no neural network)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('vehicleFacts — FactBase structure', () => {
+  test('has nine subjects', () => {
+    expect(vehicleFacts.subjects).toHaveLength(9);
+  });
+
+  test('has four predicates', () => {
+    expect(vehicleFacts.predicates).toHaveLength(4);
+    expect(vehicleFacts.predicates).toEqual(
+      expect.arrayContaining(['isLand', 'isWater', 'isAir', 'isHumanPowered'])
+    );
+  });
+
+  test('car is land-based', () => {
+    expect(vehicleFacts.get('car', 'isLand')).toBe(1);
+  });
+
+  test('airplane is airborne', () => {
+    expect(vehicleFacts.get('airplane', 'isAir')).toBe(1);
+  });
+
+  test('submarine is water-based', () => {
+    expect(vehicleFacts.get('submarine', 'isWater')).toBe(1);
+  });
+
+  test('bicycle is human powered', () => {
+    expect(vehicleFacts.get('bicycle', 'isHumanPowered')).toBe(1);
+  });
+
+  test('train is not airborne', () => {
+    expect(vehicleFacts.get('train', 'isAir')).toBe(0);
+  });
+});
+
+describe('vehicleSyllabus — structure', () => {
+  test('syllabus has four lessons', () => {
+    expect(vehicleSyllabus.lessons).toHaveLength(4);
+  });
+
+  test('lesson domains follow facts.<predicate> pattern', () => {
+    const domains = vehicleSyllabus.lessons.map(l => l.domain);
+    expect(domains).toEqual(
+      expect.arrayContaining(['facts.isLand', 'facts.isWater', 'facts.isAir', 'facts.isHumanPowered'])
+    );
+  });
+
+  test('all lessons use classification mode', () => {
+    vehicleSyllabus.lessons.forEach(l => expect(l.mode).toBe('classification'));
+  });
+
+  test('each lesson has one training sample per subject', () => {
+    vehicleSyllabus.lessons.forEach(l => expect(l.trainingData).toHaveLength(9));
+  });
+});
+
+describe('Brain — learnFacts with vehicleFacts', () => {
+  test('trains one region per vehicle predicate', () => {
+    const brain = fastBrain();
+    brain.learnFacts(vehicleFacts);
+    ['isLand', 'isWater', 'isAir', 'isHumanPowered'].forEach(p => {
+      expect(brain.hasRegion(`facts.${p}`)).toBe(true);
+    });
+  });
+
+  test('queryFact returns 0 or 1 for vehicle predicates', () => {
+    const brain = fastBrain();
+    brain.learnFacts(vehicleFacts);
+    const result = brain.queryFact('sailboat', 'isWater');
     expect([0, 1]).toContain(result);
   });
 });

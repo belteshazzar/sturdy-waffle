@@ -258,6 +258,26 @@ class Brain extends EventEmitter {
   }
 
   /**
+   * Resolve a decomposition operator token to a trained domain.
+   *
+   * Uses the token's name (e.g. AND) and defers to _resolveExpressionDomain().
+   * Returns null when the token is not an operator or when no matching domain
+   * can be resolved from trained regions.
+   *
+   * Example:
+   *   brain.resolveTokenDomain(decompTokens.TOKEN.AND) // → "boolean.AND"
+   *
+   * @param {number} opToken
+   * @returns {string|null}
+   */
+  resolveTokenDomain(opToken) {
+    if (!decompTokens.OPERATIONS.includes(opToken)) return null;
+    const opName = decompTokens.TOKEN_NAMES[opToken];
+    if (!opName) return null;
+    return this._resolveExpressionDomain({ op: opName });
+  }
+
+  /**
    * Recursively evaluate a nested expression tree using the appropriate brain
    * region for each node.
    *
@@ -456,7 +476,9 @@ class Brain extends EventEmitter {
    * Requires the controller to be in embedding mode (embeddingDim set).
    *
    * @param {object} [opts]
-   * @param {string[]} [opts.domains]  Override the domain list (default: all TOKEN_DOMAIN values)
+   * @param {string[]} [opts.domains]
+   *   Override the domain list; when provided, auto-resolution from tokens is skipped.
+   * @param {number[]} [opts.operatorTokens]  Operator tokens used for discovery (default: decompTokens.OPERATIONS)
    * @param {number}   [opts.confidenceThreshold=0.7]
    * @returns {LearnedRouter}
    */
@@ -467,8 +489,17 @@ class Brain extends EventEmitter {
         'Call initController({ embeddingDim: <n> }) first.'
       );
     }
-    const domains    = opts.domains || Object.values(decompTokens.TOKEN_DOMAIN);
-    const uniqueDomains = [...new Set(domains)];
+    const operatorTokens = opts.operatorTokens || decompTokens.OPERATIONS;
+    const resolved = opts.domains
+      ? opts.domains
+      : operatorTokens.map(tok => this.resolveTokenDomain(tok)).filter(Boolean);
+    const uniqueDomains = [...new Set(resolved)];
+    if (uniqueDomains.length === 0) {
+      throw new Error(
+        'initLearnedRouter() could not resolve any operator domains. ' +
+        'Provide opts.domains or train the relevant regions first.'
+      );
+    }
     this.learnedRouter = new LearnedRouter({
       embeddingDim:        this.controller.embeddingTable.dim,
       domains:             uniqueDomains,
@@ -488,14 +519,14 @@ class Brain extends EventEmitter {
    *   When the controller is in embedding mode, the EmbeddingTable is also
    *   updated jointly via backpropagation (Phase 1).
    *
-   * Phase 2 — Replay:
-   *   If the replay buffer already holds successful solve() episodes, a batch
-   *   is sampled and used for additional supervised fine-tuning — reinforcing
-   *   strategies that were empirically effective.
-   *
-   * Phase 3 — LearnedRouter (when learnedRouter is present):
-   *   Trains the router to map operator embeddings to domain names using the
-   *   TOKEN_DOMAIN ground-truth labels from the curriculum.
+    * Phase 2 — Replay:
+    *   If the replay buffer already holds successful solve() episodes, a batch
+    *   is sampled and used for additional supervised fine-tuning — reinforcing
+    *   strategies that were empirically effective.
+    *
+    * Phase 3 — LearnedRouter (when learnedRouter is present):
+    *   Trains the router to map operator embeddings to domain names using
+    *   domains resolved from trained regions (or curriculum labels if supplied).
    *
    * Neuroscience analogue: imitation learning corresponds to procedural
    * memory encoding; replay consolidation corresponds to sleep-phase
@@ -529,7 +560,7 @@ class Brain extends EventEmitter {
           (opTok, args) => {
             // Prefer a trained specialist for evaluation fidelity; fall back to
             // the deterministic truth table (supplied by the curriculum).
-            const domain = decompTokens.TOKEN_DOMAIN[opTok];
+            const domain = this.resolveTokenDomain(opTok);
             if (domain && this.router.hasRoute(domain)) {
               return this.predictBinary(args, domain)[0];
             }
@@ -562,7 +593,7 @@ class Brain extends EventEmitter {
       for (const stage of stages) {
         for (const problem of stage.problems) {
           for (const tok of problem.tokens) {
-            const domain = decompTokens.TOKEN_DOMAIN[tok];
+            const domain = this.resolveTokenDomain(tok);
             if (!domain) continue;
             const domainIdx = this.learnedRouter.domains.indexOf(domain);
             if (domainIdx < 0) continue;
@@ -644,19 +675,29 @@ class Brain extends EventEmitter {
       }
 
       // ── Phase 3: domain resolution ──────────────────────────────────────────
-      // Try LearnedRouter first; fall back to hard-coded TOKEN_DOMAIN map.
+      // Try LearnedRouter first; fall back to operator-name resolution.
       let domain = null;
       if (this.learnedRouter && this.controller.embeddingTable) {
         const opEmb  = this.controller.embeddingTable.lookup(action.op);
         const result = this.learnedRouter.route(opEmb);
         if (result.aboveThreshold) domain = result.domain;
       }
-      if (!domain) domain = decompTokens.TOKEN_DOMAIN[action.op];
+      if (!domain) domain = this.resolveTokenDomain(action.op);
 
-      if (!domain || !this.router.hasRoute(domain)) {
+      if (!domain) {
+        const opName = decompTokens.TOKEN_NAMES[action.op] ?? String(action.op);
         throw new Error(
-          `solve(): no trained specialist for domain '${domain}'. ` +
-          'Train the Boolean logic syllabus first.'
+          `solve(): operator '${opName}' (token ${action.op}) could not be ` +
+          'mapped to any trained specialist domain. Train the relevant syllabus ' +
+          'and (optionally) a learned router first.'
+        );
+      }
+      if (!this.router.hasRoute(domain)) {
+        const opName = decompTokens.TOKEN_NAMES[action.op] ?? String(action.op);
+        throw new Error(
+          `solve(): operator '${opName}' (token ${action.op}) maps to ` +
+          `domain '${domain}' with no trained specialist. ` +
+          'Train the relevant syllabus and (optionally) a learned router first.'
         );
       }
 

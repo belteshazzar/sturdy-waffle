@@ -8,9 +8,8 @@ const NeuralNetwork = require('../brain/NeuralNetwork');
  *
  * Neuroscience analogue: heteromodal association cortex that learns to route
  * sensory representations to the specialist cortical areas best equipped to
- * process them.  Rather than consulting a hard-coded dispatch table
- * (TOKEN_DOMAIN), the router generalises from training examples to unseen
- * operators and domains.
+ * process them.  Rather than consulting a hard-coded dispatch table, the
+ * router generalises from training examples to unseen operators and domains.
  *
  * Architecture
  * ────────────
@@ -20,15 +19,15 @@ const NeuralNetwork = require('../brain/NeuralNetwork');
  *
  * Training signal
  * ───────────────
- *  For each operator token seen in the curriculum, the ground-truth domain
- *  (from TOKEN_DOMAIN) is used as the one-hot target class.  After sufficient
- *  training the router produces the correct domain from embedding alone, making
- *  TOKEN_DOMAIN an optional fallback rather than a requirement.
+ *  For each operator token seen in the curriculum, the resolved domain is used
+ *  as the one-hot target class.  After sufficient training the router produces
+ *  the correct domain from embedding alone, making static routing unnecessary.
  *
  * Confidence threshold
  * ────────────────────
  *  When the maximum predicted score is below `confidenceThreshold` the caller
- *  should fall back to TOKEN_DOMAIN to prevent misrouting at low confidence.
+ *  should fall back to operator-name domain resolution to prevent misrouting at
+ *  low confidence.
  */
 class LearnedRouter {
   /**

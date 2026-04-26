@@ -661,7 +661,7 @@ class Brain extends EventEmitter {
     }
     const affectedDomains = new Set();
     statements.forEach(statement => {
-      const meta = statement.meta || { source };
+      const meta = { source, ...(statement.meta || {}) };
       if (statement.kind === 'fact') {
         this.factBase.assert(statement.subject, statement.predicate, statement.value, meta);
         affectedDomains.add(`facts.${statement.predicate}`);
@@ -1711,7 +1711,7 @@ class Brain extends EventEmitter {
     return report;
   }
 
-  planActObserve({ input, maxSteps, exploreWeight, predictionWeight } = {}) {
+  planActObserve({ input, maxSteps, exploreWeight, predictionWeight: predictionWeightOverride } = {}) {
     const normalized = this.normalizeInput(input, { mode: 'solve' });
     const tokens = normalized.kind === 'tokens'
       ? normalized.tokens
@@ -1744,7 +1744,7 @@ class Brain extends EventEmitter {
     let steps = 0;
     const budget = maxSteps ?? this.config.planning.maxSteps;
     const explore = exploreWeight ?? this.config.planning.exploreWeight;
-    const predictionWeightResolved = predictionWeight ?? this.config.planning.predictionWeight;
+    const predictionWeight = predictionWeightOverride ?? this.config.planning.predictionWeight;
 
     while (!mem.isSolved() && steps < budget) {
       const candidates = mem.validReductions();
@@ -1778,7 +1778,7 @@ class Brain extends EventEmitter {
 
         const solvedBonus = simulated.isSolved() ? 1 : 0;
         const novelty = this._estimateNovelty('decomposition.step', actionVec);
-        const score = solvedBonus - predictionWeightResolved * predictionError + explore * novelty;
+        const score = solvedBonus - predictionWeight * predictionError + explore * novelty;
         if (score > bestScore) {
           bestScore = score;
           best = candidate;

@@ -6,14 +6,6 @@ const ExpressionParser = require('../../src/parsing/ExpressionParser');
 const FactBase = require('../../src/knowledge/FactBase');
 const { TOKEN, VOCAB_SIZE } = require('../../src/decomposition/tokens');
 
-const factBase = new FactBase('MixedFacts', { updatePolicy: 'overwrite' });
-factBase.assert('bird', 'canFly', true);
-factBase.assert('cat', 'canFly', false);
-factBase.assertValue('apple', 'color', 'red');
-factBase.assertValue('lime', 'color', 'green');
-factBase.assertRelation('parentOf', ['alice', 'bob'], true);
-factBase.assertRelation('parentOf', ['bob', 'charlie'], true);
-
 const EXPRESSIONS = [
   'ADD(FACT(bird,canFly), 1)',
   'MUL(2, FACT(cat,canFly))',
@@ -23,21 +15,22 @@ const EXPRESSIONS = [
   'MUL(ADD(1, FACT(cat,canFly)), ADD(REL(parentOf,bob,charlie), 1))',
 ];
 
-function resolveFact(node) {
-  if (node.subject) {
-    return factBase.get(node.subject, node.predicate) ?? 0;
-  }
-  if (node.name) {
-    return factBase.getRelation(node.name, node.args) ?? 0;
-  }
-  return 0;
+function createMixedExpressionFactBase() {
+  const factBase = new FactBase('MixedFacts', { updatePolicy: 'overwrite' });
+  factBase.assert('bird', 'canFly', true);
+  factBase.assert('cat', 'canFly', false);
+  factBase.assertValue('apple', 'color', 'red');
+  factBase.assertValue('lime', 'color', 'green');
+  factBase.assertRelation('parentOf', ['alice', 'bob'], true);
+  factBase.assertRelation('parentOf', ['bob', 'charlie'], true);
+  return factBase;
 }
 
-function evalExpression(node) {
+function evalExpression(node, factBase) {
   if (node.value !== undefined) return node.value;
-  if (node.fact) return resolveFact(node.fact);
-  if (node.relation) return resolveFact(node.relation);
-  const args = node.inputs.map(evalExpression);
+  if (node.fact) return resolveFact(node.fact, factBase);
+  if (node.relation) return resolveFact(node.relation, factBase);
+  const args = node.inputs.map(child => evalExpression(child, factBase));
   switch (node.op) {
     case 'ADD': return args[0] + args[1];
     case 'SUB': return args[0] - args[1];
@@ -60,37 +53,64 @@ function encodeTokens(tokens) {
   });
 }
 
-const trainingData = EXPRESSIONS.map(expr => {
-  const tree = ExpressionParser.parseExpression(expr);
-  const tokens = ExpressionParser.expressionToTokens(tree, { factResolver: resolveFact });
+function resolveFact(node, factBase) {
+  if (node.subject) {
+    return factBase.get(node.subject, node.predicate) ?? 0;
+  }
+  if (node.name) {
+    return factBase.getRelation(node.name, node.args) ?? 0;
+  }
+  return 0;
+}
+
+function createMixedExpressionSyllabus() {
+  const factBase = createMixedExpressionFactBase();
+  const trainingData = EXPRESSIONS.map(expr => {
+    const tree = ExpressionParser.parseExpression(expr);
+    const tokens = ExpressionParser.expressionToTokens(tree, { factResolver: node => resolveFact(node, factBase) });
+    return {
+      input: encodeTokens(tokens),
+      output: [evalExpression(tree, factBase)],
+    };
+  });
+
+  const mixedExpressionLesson = new Lesson({
+    name: 'Mixed Domain Expression Solving',
+    domain: 'sequence.MIXED_EXPR',
+    description: 'Solve mixed-domain expressions including facts and relations.',
+    trainingData,
+    inputSize: 2,
+    outputSize: 1,
+    mode: 'regression',
+    normalise: { outputRange: [0, 4] },
+    sequence: true,
+    tags: ['expressions', 'mixed', 'sequence'],
+  });
+
+  const mixedExpressionSyllabus = new Syllabus({
+    name: 'Mixed Domain Expressions',
+    description: 'Train sequence reasoning across boolean, math, facts, and relations.',
+    lessons: [mixedExpressionLesson],
+    tags: ['expressions', 'mixed'],
+  });
+
   return {
-    input: encodeTokens(tokens),
-    output: [evalExpression(tree)],
+    mixedExpressionLesson,
+    mixedExpressionSyllabus,
+    mixedExpressionFactBase: factBase,
   };
-});
+}
 
-const mixedExpressionLesson = new Lesson({
-  name: 'Mixed Domain Expression Solving',
-  domain: 'sequence.MIXED_EXPR',
-  description: 'Solve mixed-domain expressions including facts and relations.',
-  trainingData,
-  inputSize: 2,
-  outputSize: 1,
-  mode: 'regression',
-  normalise: { outputRange: [0, 4] },
-  sequence: true,
-  tags: ['expressions', 'mixed', 'sequence'],
-});
-
-const mixedExpressionSyllabus = new Syllabus({
-  name: 'Mixed Domain Expressions',
-  description: 'Train sequence reasoning across boolean, math, facts, and relations.',
-  lessons: [mixedExpressionLesson],
-  tags: ['expressions', 'mixed'],
-});
+const {
+  mixedExpressionLesson,
+  mixedExpressionSyllabus,
+  mixedExpressionFactBase,
+} = createMixedExpressionSyllabus();
 
 module.exports = {
   mixedExpressionLesson,
   mixedExpressionSyllabus,
-  mixedExpressionFactBase: factBase,
+  mixedExpressionFactBase,
+  createMixedExpressionFactBase,
+  createMixedExpressionSyllabus,
 };

@@ -56,14 +56,8 @@ class FactBase {
    * @param {string} [name='Facts']  Human-readable name for this knowledge base.
    */
   constructor(name = 'Facts', opts = {}) {
-    let resolvedName = name;
-    let resolvedOpts = opts;
-    if (name && typeof name === 'object') {
-      resolvedOpts = name;
-      resolvedName = name.name || 'Facts';
-    }
-    this.name       = resolvedName;
-    this.updatePolicy = resolvedOpts.updatePolicy || 'overwrite';
+    this.name       = name;
+    this.updatePolicy = opts.updatePolicy || 'overwrite';
     this.subjects   = [];          // ordered subject vocabulary
     this._facts     = Object.create(null);   // `${subject}:${predicate}` → 0|1
     this._factMeta  = Object.create(null);   // `${subject}:${predicate}` → { confidence?, source? }

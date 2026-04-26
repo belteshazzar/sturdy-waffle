@@ -9,11 +9,12 @@ const { euclideanDistance } = require('../utils/MathUtils');
 class SharedEmbeddingBank {
   constructor({
     embeddingSize = 8,
-    prototypeCount = 8,
+    prototypeCount = null,
     learningRate = 0.2,
   } = {}) {
-    this.embeddingSize  = embeddingSize;
-    this.prototypeCount = prototypeCount;
+    const effectiveSize = prototypeCount ?? embeddingSize;
+    this.embeddingSize  = effectiveSize;
+    this.prototypeCount = effectiveSize;
     this.learningRate   = learningRate;
     this._banks         = new Map(); // inputSize -> { prototypes: number[][] }
   }

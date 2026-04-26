@@ -404,10 +404,11 @@ class Brain extends EventEmitter {
    *   • Regions trained in 'regression' mode return the raw continuous prediction,
    *     allowing continuous intermediate values to propagate through the tree.
    *
-   * An additional terminal node form is supported for declarative fact lookups:
-   *   • Fact query:     { fact: { subject: <string>, predicate: <string> } }
-   *     Requires a FactBase to be loaded via learnFacts() and the corresponding
-   *     facts.<predicate> region to be trained.  Returns 0 or 1.
+    * An additional terminal node form is supported for declarative fact lookups:
+    *   • Fact query:     { fact: { subject: <string>, predicate: <string>, infer?: true } }
+    *     Requires a FactBase to be loaded via learnFacts(). When `infer` is true
+    *     the Brain consults semantic memory rules/analogies before falling back.
+    *     Returns 0 or 1.
    *
    * @param {object} expression
    * @returns {number}

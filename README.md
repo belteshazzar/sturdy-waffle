@@ -487,6 +487,8 @@ The Brain now supports opt-in mechanisms for few-shot learning, memory, and self
     sharedEmbedding: { enabled: true, embeddingSize: 8, prototypeCount: 8 },
   });
   ```
+  The effective embedding dimensionality equals `prototypeCount` (falls back to
+  `embeddingSize` when the prototype count is omitted).
 - **Episodic + Semantic Memory** — automatic recording of training samples and
   induced facts/rules (see `brain.memory`).
 - **Self-supervised loops** — call `brain.selfSupervise()` to update shared

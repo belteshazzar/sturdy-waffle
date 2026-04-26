@@ -36,7 +36,7 @@ class EvaluationSuite {
     });
     return {
       evaluated: expressions.length,
-      accuracy:  expressions.length === 0 ? null : correct / expressions.length,
+      accuracy:  correct / expressions.length,
       results,
     };
   }

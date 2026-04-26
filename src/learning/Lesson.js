@@ -33,6 +33,8 @@ class Lesson {
    *   `{ inputRange: [min, max], outputRange: [min, max] }`
    *   Values are scaled from the given range to [0, 1] for training and the
    *   inverse is applied to predictions so callers always work in raw units.
+   * @param {boolean}  [opts.sequence=false]  Treat input as a variable-length sequence.
+   * @param {number}   [opts.sequenceHiddenSize]  Hidden size override for sequence models.
    */
   constructor({
     name,
@@ -46,6 +48,8 @@ class Lesson {
     networkConfig = null,
     mode = 'classification',
     normalise = null,
+    sequence = false,
+    sequenceHiddenSize,
   }) {
     if (!name)                              throw new Error('Lesson must have a name');
     if (!domain)                            throw new Error('Lesson must have a domain');
@@ -64,6 +68,8 @@ class Lesson {
     this.networkConfig  = networkConfig;
     this.mode           = mode;
     this.normalise      = normalise;
+    this.sequence       = sequence;
+    this.sequenceHiddenSize = sequenceHiddenSize;
   }
 }
 

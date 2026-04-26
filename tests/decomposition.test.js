@@ -497,7 +497,7 @@ describe('Brain.trainDecomposition() + solve() — integration', () => {
     let   ok = 0;
 
     for (const { tokens: toks, answer } of ps) {
-      const op = toks[0];
+      const op = toks[0].token ?? toks[0];
       // Only test domains the brain has been trained on
       const domain = brain.resolveTokenDomain(op);
       if (!domain || !brain.router.hasRoute(domain)) continue;
@@ -508,7 +508,8 @@ describe('Brain.trainDecomposition() + solve() — integration', () => {
     // The controller is trained with random initialisation and stochastic
     // curriculum sampling, so we allow some variance in this integration test.
     const tested = ps.filter(p => {
-      const domain = brain.resolveTokenDomain(p.tokens[0]);
+      const opToken = p.tokens[0].token ?? p.tokens[0];
+      const domain = brain.resolveTokenDomain(opToken);
       return domain && brain.router.hasRoute(domain);
     }).length;
     expect(ok / tested).toBeGreaterThanOrEqual(0.75);

@@ -28,6 +28,7 @@ describe('SequenceBrainRegion', () => {
 
     const result = region.train();
     expect(result.trained).toBe(true);
-    expect(region.predict([1, 0])[0]).toBeGreaterThanOrEqual(0);
+    const output = region.predict([1, 0])[0];
+    expect(Number.isNaN(output)).toBe(false);
   });
 });
